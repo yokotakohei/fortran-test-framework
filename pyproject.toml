@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fortest"
+version = "0.1.0"
+description = "Automated test discovery and execution for Fortran"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "yokotakohei"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Testing",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Fortran",
+]
+
+[project.scripts]
+fortest = "fortest.runner:main"
+
+[project.urls]
+Homepage = "https://github.com/yokotakohei/fortran-test-runner"
+Repository = "https://github.com/yokotakohei/fortran-test-runner"
+
+[tool.setuptools.packages.find]
+where = ["."]  
+include = ["fortest*"]
+
+[tool.setuptools.package-data]
+fortest = ["*.f90"]

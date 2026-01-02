@@ -1,0 +1,18 @@
+name = "fortest-example"
+version = "0.1.0"
+license = "MIT"
+author = "Kohei Yokota"
+copyright = "Copyright 2026 Kohei Yokota"
+
+[build]
+auto-executables = false
+auto-tests = false
+auto-examples = false
+
+[library]
+source-dir = "src"
+
+[[test]]
+name = "test_module_sample"
+source-dir = "test"
+main = "run_tests.f90"
