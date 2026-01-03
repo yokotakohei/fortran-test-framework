@@ -148,6 +148,41 @@ class FortranTestRunner:
         return unique
 
 
+    def _find_build_directories(self, test_file: Path) -> list[Path]:
+        """
+        Find build directories that may contain pre-compiled modules (.mod and .o files).
+
+        Parameters
+        ----------
+        test_file : Path
+            Path to the test file
+
+        Returns
+        -------
+        list[Path]
+            List of build directories found
+        """
+        build_dirs: list[Path] = []
+        current: Path = test_file.resolve().parent
+
+        # Search upward for build directories
+        for _ in range(self.SEARCH_DEPTH_MAX):
+            # Check for common build directory names
+            for build_name in ["build", "Build", "BUILD"]:
+                build_dir = current / build_name
+                if build_dir.exists() and build_dir.is_dir():
+                    build_dirs.append(build_dir)
+                    # Also search subdirectories of build/
+                    for subdir in build_dir.rglob("*"):
+                        if subdir.is_dir() and any(subdir.glob("*.mod")):
+                            build_dirs.append(subdir)
+
+            if current == current.parent:
+                break
+            current = current.parent
+
+        return build_dirs
+
     def _build_search_directories(self, test_file: Path) -> list[Path]:
         """
         Build list of directories to search for module files.
@@ -201,17 +236,8 @@ class FortranTestRunner:
 
     def _find_assertion_module(self, search_dirs: list[Path]) -> Path | None:
         """
-        Find fortest_assertions module file.
-
-        Parameters
-        ----------
-        search_dirs : list[Path]
-            Directories to search in
-
-        Returns
-        -------
-        Path | None
-            Path to module_fortest_assertions.f90, or None if not found
+        Find fortest_assertions module file. Falls back to bundled module shipped
+        with the fortest package if not found in project search dirs.
         """
         for search_dir in search_dirs:
             for f90_file in self.find_fortran_files_recursive(search_dir, max_depth=2):
@@ -222,6 +248,13 @@ class FortranTestRunner:
                     print(f"Using assertions from: {f90_file}")
 
                 return f90_file
+
+        # Fallback: use bundled module located next to this runner.py
+        bundled = Path(__file__).resolve().parent / "module_fortest_assertions.f90"
+        if bundled.exists():
+            if self.verbose:
+                print(f"Using bundled assertions from: {bundled}")
+            return bundled
 
         return None
 
@@ -430,17 +463,8 @@ class FortranTestRunner:
         """
         Find a Fortran file that defines the given module.
 
-        Parameters
-        ----------
-        module_name : str
-            Name of the module to find
-        search_dirs : list[Path]
-            Directories to search in
-
-        Returns
-        -------
-        Path | None
-            Path to the file defining the module, or None if not found
+        First searches the provided search_dirs, then falls back to a broader
+        recursive search from the current working directory if not found.
         """
         for search_dir in search_dirs:
             # Search recursively in this directory
@@ -448,6 +472,17 @@ class FortranTestRunner:
                 file_module = self.extract_module_name(f90_file)
                 if file_module == module_name.lower():
                     return f90_file
+
+        # Fallback: search the current working directory tree more broadly
+        cwd = Path.cwd()
+        if self.verbose:
+            print(f"Module {module_name} not found in search_dirs, searching {cwd} recursively as fallback")
+        for f90_file in self.find_fortran_files_recursive(cwd, max_depth=6):
+            file_module = self.extract_module_name(f90_file)
+            if file_module == module_name.lower():
+                if self.verbose:
+                    print(f"Found {module_name} at {f90_file} via fallback search")
+                return f90_file
 
         return None
 
@@ -1326,10 +1361,61 @@ class FortranTestRunner:
             output_dir,
         )
 
-        # Compile
+        if self.verbose:
+            print(f"Generated program for {test_subroutine}:")
+            with open(normal_program, 'r') as f:
+                print(f.read())
+
+        # Find build directories for pre-compiled modules
+        build_dirs: list[Path] = self._find_build_directories(test_file)
+
+        # Compile module dependencies that don't have pre-compiled versions
+        compiled_objects: list[Path] = []
+        for module_file in module_files:
+            compile_mod_cmd: list[str] = [
+                self.compiler,
+                "-c",
+                str(module_file),
+            ]
+            # Add build directories to module search path
+            for build_dir in build_dirs:
+                compile_mod_cmd.extend(["-I", str(build_dir)])
+            # Output to temp directory
+            compile_mod_cmd.extend([
+                "-J", str(output_dir),
+                "-o", str(output_dir / f"{module_file.stem}.o"),
+            ])
+
+            if self.verbose:
+                print(f"Compiling module dependency: {' '.join(compile_mod_cmd)}")
+            try:
+                subprocess.run(
+                    compile_mod_cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                compiled_objects.append(output_dir / f"{module_file.stem}.o")
+            except subprocess.CalledProcessError as e:
+                return TestResult(
+                    test_subroutine,
+                    False,
+                    f"Failed to compile dependency {module_file.name}: {e.stderr}",
+                )
+
+        # Compile test file and main program
         executable: Path = output_dir / f"{test_subroutine}_normal"
-        compile_cmd: list[str] = [self.compiler, "-o", str(executable)]
-        compile_cmd.extend([str(f) for f in module_files])
+        compile_cmd: list[str] = [
+            self.compiler,
+            "-o", str(executable),
+        ]
+        # Add build directories to module search path
+        for build_dir in build_dirs:
+            compile_cmd.extend(["-I", str(build_dir)])
+        # Add temp directory for newly compiled modules
+        compile_cmd.extend(["-I", str(output_dir), "-J", str(output_dir)])
+        # Add compiled module objects
+        compile_cmd.extend([str(obj) for obj in compiled_objects])
         compile_cmd.append(str(test_file))
         compile_cmd.append(str(normal_program))
 
@@ -1572,10 +1658,56 @@ class FortranTestRunner:
             output_dir,
         )
 
-        # Compile
+        # Find build directories for pre-compiled modules
+        build_dirs: list[Path] = self._find_build_directories(test_file)
+
+        # Compile module dependencies that don't have pre-compiled versions
+        compiled_objects: list[Path] = []
+        for module_file in module_files:
+            compile_mod_cmd: list[str] = [
+                self.compiler,
+                "-c",
+                str(module_file),
+            ]
+            # Add build directories to module search path
+            for build_dir in build_dirs:
+                compile_mod_cmd.extend(["-I", str(build_dir)])
+            # Output to temp directory
+            compile_mod_cmd.extend([
+                "-J", str(output_dir),
+                "-o", str(output_dir / f"{module_file.stem}.o"),
+            ])
+
+            if self.verbose:
+                print(f"Compiling module dependency: {' '.join(compile_mod_cmd)}")
+            try:
+                subprocess.run(
+                    compile_mod_cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                compiled_objects.append(output_dir / f"{module_file.stem}.o")
+            except subprocess.CalledProcessError as e:
+                return TestResult(
+                    test_subroutine,
+                    False,
+                    f"Failed to compile dependency {module_file.name}: {e.stderr}",
+                )
+
+        # Compile test file and main program
         executable: Path = output_dir / test_subroutine
-        compile_cmd: list[str] = [self.compiler, "-o", str(executable)]
-        compile_cmd.extend([str(f) for f in module_files])
+        compile_cmd: list[str] = [
+            self.compiler,
+            "-o", str(executable),
+        ]
+        # Add build directories to module search path
+        for build_dir in build_dirs:
+            compile_cmd.extend(["-I", str(build_dir)])
+        # Add temp directory for newly compiled modules
+        compile_cmd.extend(["-I", str(output_dir), "-J", str(output_dir)])
+        # Add compiled module objects
+        compile_cmd.extend([str(obj) for obj in compiled_objects])
         compile_cmd.append(str(test_file))
         compile_cmd.append(str(error_program))
 

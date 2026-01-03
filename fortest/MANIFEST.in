@@ -1,0 +1,2 @@
+include fortest/*.f90
+include fortest/*.F90
