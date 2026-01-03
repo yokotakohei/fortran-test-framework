@@ -230,7 +230,9 @@ fpm build
 fortest test/
 ```
 
-Note: After building with FPM, `fortest` automatically:
+### How fortest Works
+
+After building your project (with either CMake or FPM), `fortest` automatically:
 - Discovers test files (`test_*.f90`)
 - Generates test runners
 - Compiles tests using build artifacts from `build/`

@@ -48,7 +48,7 @@ module fortest_assertions
     !> Error message prefix for array element mismatch.
     character(len=*), parameter :: msg_err_array_differ = "Arrays differ at index"
     
-    ! Format strings for aligned output.
+    ! Format character for aligned output.
     !> Format for count output.
     character(len=*), parameter :: fmt_count = "(A,I0)"
     !> Format for result output with color.
@@ -65,27 +65,37 @@ module fortest_assertions
     integer(int32) :: failed_count = 0
     
     interface assert_equal
-        module procedure assert_equal_int
+        module procedure assert_equal_int8
+        module procedure assert_equal_int16
+        module procedure assert_equal_int32
+        module procedure assert_equal_int64
         module procedure assert_equal_real
         module procedure assert_equal_double
+        module procedure assert_equal_complex32
+        module procedure assert_equal_complex64
         module procedure assert_equal_logical
-        module procedure assert_equal_string
+        module procedure assert_equal_character
     end interface
     
     interface assert_array_equal
-        module procedure assert_array_equal_int
+        module procedure assert_array_equal_int8
+        module procedure assert_array_equal_int16
+        module procedure assert_array_equal_int32
+        module procedure assert_array_equal_int64
         module procedure assert_array_equal_real
         module procedure assert_array_equal_double
+        module procedure assert_array_equal_complex32
+        module procedure assert_array_equal_complex64
     end interface
 
 contains
 
-    !> Assert equality of int32 value.
-    subroutine assert_equal_int(actual, expected, test_name)
+    !> Assert equality of int8 value.
+    subroutine assert_equal_int8(actual, expected, test_name)
         !> Actual value.
-        integer, intent(in) :: actual
+        integer(int8), intent(in) :: actual
         !> Expected value.
-        integer, intent(in) :: expected
+        integer(int8), intent(in) :: expected
         !> Test name.
         character(*), intent(in) :: test_name
         
@@ -94,9 +104,66 @@ contains
         if(actual == expected) then
             call report_pass(test_name)
         else
-            call report_fail(test_name, expected, actual)
+            call report_fail_int8(test_name, expected, actual)
         end if
-    end subroutine assert_equal_int
+    end subroutine assert_equal_int8
+
+
+    !> Assert equality of int16 value.
+    subroutine assert_equal_int16(actual, expected, test_name)
+        !> Actual value.
+        integer(int16), intent(in) :: actual
+        !> Expected value.
+        integer(int16), intent(in) :: expected
+        !> Test name.
+        character(*), intent(in) :: test_name
+        
+        test_count = test_count + 1
+        
+        if(actual == expected) then
+            call report_pass(test_name)
+        else
+            call report_fail_int16(test_name, expected, actual)
+        end if
+    end subroutine assert_equal_int16
+
+
+    !> Assert equality of int32 value.
+    subroutine assert_equal_int32(actual, expected, test_name)
+        !> Actual value.
+        integer(int32), intent(in) :: actual
+        !> Expected value.
+        integer(int32), intent(in) :: expected
+        !> Test name.
+        character(*), intent(in) :: test_name
+        
+        test_count = test_count + 1
+        
+        if(actual == expected) then
+            call report_pass(test_name)
+        else
+            call report_fail_int32(test_name, expected, actual)
+        end if
+    end subroutine assert_equal_int32
+
+
+    !> Assert equality of int64 value.
+    subroutine assert_equal_int64(actual, expected, test_name)
+        !> Actual value.
+        integer(int64), intent(in) :: actual
+        !> Expected value.
+        integer(int64), intent(in) :: expected
+        !> Test name.
+        character(*), intent(in) :: test_name
+        
+        test_count = test_count + 1
+        
+        if(actual == expected) then
+            call report_pass(test_name)
+        else
+            call report_fail_int64(test_name, expected, actual)
+        end if
+    end subroutine assert_equal_int64
 
 
     !> Assert equality of real32 value.
@@ -151,6 +218,60 @@ contains
     end subroutine assert_equal_double
 
 
+    !> Assert equality of complex(real32) value.
+    !> Test passes if both real and imaginary parts satisfy |actual - expected| < tol.
+    subroutine assert_equal_complex32(actual, expected, test_name, tol)
+        !> Actual value.
+        complex(real32), intent(in) :: actual
+        !> Expected value.
+        complex(real32), intent(in) :: expected
+        !> Test name.
+        character(*), intent(in) :: test_name
+        !> Tolerance for comparison (default 1.0e-6)
+        real(real32), intent(in), optional :: tol
+        real(real32) :: tolerance
+        real(real32), parameter :: tolerance_default = 1.0e-6
+
+        test_count = test_count + 1
+        tolerance = tolerance_default
+        if(present(tol)) tolerance = tol
+
+        if(abs(real(actual) - real(expected)) < tolerance .and. &
+           abs(aimag(actual) - aimag(expected)) < tolerance) then
+            call report_pass(test_name)
+        else
+            call report_fail_complex32(test_name, expected, actual)
+        end if
+    end subroutine assert_equal_complex32
+
+
+    !> Assert equality of complex(real64) value.
+    !> Test passes if both real and imaginary parts satisfy |actual - expected| < tol.
+    subroutine assert_equal_complex64(actual, expected, test_name, tol)
+        !> Actual value.
+        complex(real64), intent(in) :: actual
+        !> Expected value.
+        complex(real64), intent(in) :: expected
+        !> Test name.
+        character(len=*), intent(in) :: test_name
+        !> Tolerance for comparison (default 1.0d-12).
+        real(real64), intent(in), optional :: tol
+        real(real64) :: tolerance
+        real(real64), parameter :: tolerance_default = 1.0d-12
+        
+        test_count = test_count + 1
+        tolerance = tolerance_default
+        if(present(tol)) tolerance = tol
+        
+        if(abs(real(actual) - real(expected)) < tolerance .and. &
+           abs(aimag(actual) - aimag(expected)) < tolerance) then
+            call report_pass(test_name)
+        else
+            call report_fail_complex64(test_name, expected, actual)
+        end if
+    end subroutine assert_equal_complex64
+
+
     !> Assert equality of logical value.
     subroutine assert_equal_logical(actual, expected, test_name)
         !> Actual value.
@@ -170,8 +291,8 @@ contains
     end subroutine assert_equal_logical
 
 
-    !> Assert equality of string value.
-    subroutine assert_equal_string(actual, expected, test_name)
+    !> Assert equality of character value.
+    subroutine assert_equal_character(actual, expected, test_name)
         !> Actual value.
         character(len=*), intent(in) :: actual
         !> Expected value.
@@ -184,9 +305,9 @@ contains
         if(actual == expected) then
             call report_pass(test_name)
         else
-            call report_fail_string(test_name, expected, actual)
+            call report_fail_character(test_name, expected, actual)
         end if
-    end subroutine assert_equal_string
+    end subroutine assert_equal_character
 
 
     !> Assert that condition is true.
@@ -223,12 +344,12 @@ contains
     end subroutine assert_false
 
 
-    !> Assert equality of integer array.
-    subroutine assert_array_equal_int(actual, expected, test_name)
+    !> Assert equality of int8 array.
+    subroutine assert_array_equal_int8(actual, expected, test_name)
         !> Actual array.
-        integer, intent(in) :: actual(:)
+        integer(int8), intent(in) :: actual(:)
         !> Expected array.
-        integer, intent(in) :: expected(:)
+        integer(int8), intent(in) :: expected(:)
         !> Test name.
         character(len=*), intent(in) :: test_name
         integer :: i
@@ -250,7 +371,97 @@ contains
         end do
         
         call report_pass(test_name)
-    end subroutine assert_array_equal_int
+    end subroutine assert_array_equal_int8
+
+
+    !> Assert equality of int16 array.
+    subroutine assert_array_equal_int16(actual, expected, test_name)
+        !> Actual array.
+        integer(int16), intent(in) :: actual(:)
+        !> Expected array.
+        integer(int16), intent(in) :: expected(:)
+        !> Test name.
+        character(len=*), intent(in) :: test_name
+        integer :: i
+        character(len=100) :: error_msg
+        
+        test_count = test_count + 1
+        
+        if(size(actual) /= size(expected)) then
+            call report_fail_simple(test_name, msg_err_array_size)
+            return
+        end if
+        
+        do i = 1, size(actual)
+            if(actual(i) /= expected(i)) then
+                write(error_msg, '(A,I0,A,I0,A,I0)') msg_err_array_differ, i, ": ", expected(i), msg_vs, actual(i)
+                call report_fail_simple(test_name, trim(error_msg))
+                return
+            end if
+        end do
+        
+        call report_pass(test_name)
+    end subroutine assert_array_equal_int16
+
+
+    !> Assert equality of int32 array.
+    subroutine assert_array_equal_int32(actual, expected, test_name)
+        !> Actual array.
+        integer(int32), intent(in) :: actual(:)
+        !> Expected array.
+        integer(int32), intent(in) :: expected(:)
+        !> Test name.
+        character(len=*), intent(in) :: test_name
+        integer :: i
+        character(len=100) :: error_msg
+        
+        test_count = test_count + 1
+        
+        if(size(actual) /= size(expected)) then
+            call report_fail_simple(test_name, msg_err_array_size)
+            return
+        end if
+        
+        do i = 1, size(actual)
+            if(actual(i) /= expected(i)) then
+                write(error_msg, '(A,I0,A,I0,A,I0)') msg_err_array_differ, i, ": ", expected(i), msg_vs, actual(i)
+                call report_fail_simple(test_name, trim(error_msg))
+                return
+            end if
+        end do
+        
+        call report_pass(test_name)
+    end subroutine assert_array_equal_int32
+
+
+    !> Assert equality of int64 array.
+    subroutine assert_array_equal_int64(actual, expected, test_name)
+        !> Actual array.
+        integer(int64), intent(in) :: actual(:)
+        !> Expected array.
+        integer(int64), intent(in) :: expected(:)
+        !> Test name.
+        character(len=*), intent(in) :: test_name
+        integer :: i
+        character(len=100) :: error_msg
+        
+        test_count = test_count + 1
+        
+        if(size(actual) /= size(expected)) then
+            call report_fail_simple(test_name, msg_err_array_size)
+            return
+        end if
+        
+        do i = 1, size(actual)
+            if(actual(i) /= expected(i)) then
+                write(error_msg, '(A,I0,A,I0,A,I0)') msg_err_array_differ, i, ": ", expected(i), msg_vs, actual(i)
+                call report_fail_simple(test_name, trim(error_msg))
+                return
+            end if
+        end do
+        
+        call report_pass(test_name)
+    end subroutine assert_array_equal_int64
 
 
     !> Assert equality of real32 array.
@@ -327,6 +538,86 @@ contains
     end subroutine assert_array_equal_double
 
 
+    !> Assert equality of complex(real32) array.
+    !> Test passes if both real and imaginary parts satisfy |actual(i) - expected(i)| < tol for all i.
+    subroutine assert_array_equal_complex32(actual, expected, test_name, tol)
+        !> Actual array.
+        complex(real32), intent(in) :: actual(:)
+        !> Expected array.
+        complex(real32), intent(in) :: expected(:)
+        !> Test name.
+        character(len=*), intent(in) :: test_name
+        !> Tolerance for comparison.
+        real(real32), intent(in), optional :: tol
+        real(real32) :: tolerance
+        real(real32), parameter :: tolerance_default = 1.0e-6
+        integer :: i
+        character(len=150) :: error_msg
+        
+        test_count = test_count + 1
+        tolerance = tolerance_default
+        if(present(tol)) tolerance = tol
+        
+        if(size(actual) /= size(expected)) then
+            call report_fail_simple(test_name, msg_err_array_size)
+            return
+        end if
+        
+        do i = 1, size(actual)
+            if(abs(real(actual(i)) - real(expected(i))) >= tolerance .or. &
+               abs(aimag(actual(i)) - aimag(expected(i))) >= tolerance) then
+                write(error_msg, '(A,I0,A,"(",E12.5,",",E12.5,")",A,"(",E12.5,",",E12.5,")")') &
+                    msg_err_array_differ, i, ": ", real(expected(i)), aimag(expected(i)), &
+                    msg_vs, real(actual(i)), aimag(actual(i))
+                call report_fail_simple(test_name, trim(error_msg))
+                return
+            end if
+        end do
+        
+        call report_pass(test_name)
+    end subroutine assert_array_equal_complex32
+
+
+    !> Assert equality of complex(real64) array.
+    !> Test passes if both real and imaginary parts satisfy |actual(i) - expected(i)| < tol for all i.
+    subroutine assert_array_equal_complex64(actual, expected, test_name, tol)
+        !> Actual array.
+        complex(real64), intent(in) :: actual(:)
+        !> Expected array.
+        complex(real64), intent(in) :: expected(:)
+        !> Test name.
+        character(len=*), intent(in) :: test_name
+        !> Tolerance for comparison.
+        real(real64), intent(in), optional :: tol
+        real(real64) :: tolerance
+        real(real64), parameter :: tolerance_default = 1.0d-12
+        integer :: i
+        character(len=200) :: error_msg
+        
+        test_count = test_count + 1
+        tolerance = tolerance_default
+        if(present(tol)) tolerance = tol
+        
+        if(size(actual) /= size(expected)) then
+            call report_fail_simple(test_name, msg_err_array_size)
+            return
+        end if
+        
+        do i = 1, size(actual)
+            if(abs(real(actual(i)) - real(expected(i))) >= tolerance .or. &
+               abs(aimag(actual(i)) - aimag(expected(i))) >= tolerance) then
+                write(error_msg, '(A,I0,A,"(",E20.12,",",E20.12,")",A,"(",E20.12,",",E20.12,")")') &
+                    msg_err_array_differ, i, ": ", real(expected(i)), aimag(expected(i)), &
+                    msg_vs, real(actual(i)), aimag(actual(i))
+                call report_fail_simple(test_name, trim(error_msg))
+                return
+            end if
+        end do
+        
+        call report_pass(test_name)
+    end subroutine assert_array_equal_complex64
+
+
     !> Report test pass.
     subroutine report_pass(test_name)
         !> Test name.
@@ -337,19 +628,64 @@ contains
     end subroutine report_pass
 
 
-    !> Report integer test failure.
-    subroutine report_fail(test_name, expected, actual)
+    !> Report int8 test failure.
+    subroutine report_fail_int8(test_name, expected, actual)
         !> Test name.
         character(len=*), intent(in) :: test_name
         !> Expected value.
-        integer, intent(in) :: expected
+        integer(int8), intent(in) :: expected
         !> Actual value.
-        integer, intent(in) :: actual
+        integer(int8), intent(in) :: actual
 
         failed_count = failed_count + 1
         print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
         print '(A,A,I0,A,A,I0)', msg_indent, "expected = ", expected, msg_vs, "actual = ", actual
-    end subroutine report_fail
+    end subroutine report_fail_int8
+
+
+    !> Report int16 test failure.
+    subroutine report_fail_int16(test_name, expected, actual)
+        !> Test name.
+        character(len=*), intent(in) :: test_name
+        !> Expected value.
+        integer(int16), intent(in) :: expected
+        !> Actual value.
+        integer(int16), intent(in) :: actual
+
+        failed_count = failed_count + 1
+        print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
+        print '(A,A,I0,A,A,I0)', msg_indent, "expected = ", expected, msg_vs, "actual = ", actual
+    end subroutine report_fail_int16
+
+
+    !> Report int32 test failure.
+    subroutine report_fail_int32(test_name, expected, actual)
+        !> Test name.
+        character(len=*), intent(in) :: test_name
+        !> Expected value.
+        integer(int32), intent(in) :: expected
+        !> Actual value.
+        integer(int32), intent(in) :: actual
+
+        failed_count = failed_count + 1
+        print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
+        print '(A,A,I0,A,A,I0)', msg_indent, "expected = ", expected, msg_vs, "actual = ", actual
+    end subroutine report_fail_int32
+
+
+    !> Report int64 test failure.
+    subroutine report_fail_int64(test_name, expected, actual)
+        !> Test name.
+        character(len=*), intent(in) :: test_name
+        !> Expected value.
+        integer(int64), intent(in) :: expected
+        !> Actual value.
+        integer(int64), intent(in) :: actual
+
+        failed_count = failed_count + 1
+        print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
+        print '(A,A,I0,A,A,I0)', msg_indent, "expected = ", expected, msg_vs, "actual = ", actual
+    end subroutine report_fail_int64
 
 
     !> Report real32 test failure.
@@ -382,6 +718,40 @@ contains
     end subroutine report_fail_double
 
 
+    !> Report complex(real32) test failure.
+    subroutine report_fail_complex32(test_name, expected, actual)
+        !> Test name.
+        character(len=*), intent(in) :: test_name
+        !> Expected value.
+        complex(real32), intent(in) :: expected
+        !> Actual value.
+        complex(real32), intent(in) :: actual
+
+        failed_count = failed_count + 1
+        print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
+        print '(A,A,"(",G0,",",G0,")",A,A,"(",G0,",",G0,")")', &
+            msg_indent, "expected = ", real(expected), aimag(expected), &
+            msg_vs, "actual = ", real(actual), aimag(actual)
+    end subroutine report_fail_complex32
+
+
+    !> Report complex(real64) test failure.
+    subroutine report_fail_complex64(test_name, expected, actual)
+        !> Test name.
+        character(len=*), intent(in) :: test_name
+        !> Expected value.
+        complex(real64), intent(in) :: expected
+        !> Actual value.
+        complex(real64), intent(in) :: actual
+
+        failed_count = failed_count + 1
+        print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
+        print '(A,A,"(",G0,",",G0,")",A,A,"(",G0,",",G0,")")', &
+            msg_indent, "expected = ", real(expected), aimag(expected), &
+            msg_vs, "actual = ", real(actual), aimag(actual)
+    end subroutine report_fail_complex64
+
+
     !> Report logical test failure.
     subroutine report_fail_logical(test_name)
         !> Test name.
@@ -392,8 +762,8 @@ contains
     end subroutine report_fail_logical
 
 
-    !> Report string test failure.
-    subroutine report_fail_string(test_name, expected, actual)
+    !> Report character test failure.
+    subroutine report_fail_character(test_name, expected, actual)
         !> Test name.
         character(len=*), intent(in) :: test_name
         !> Expected value.
@@ -404,7 +774,7 @@ contains
         failed_count = failed_count + 1
         print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
         print fmt_test_result, msg_indent, msg_expected, '"', expected, '", ', msg_got, '"', actual, '"'
-    end subroutine report_fail_string
+    end subroutine report_fail_character
 
 
     !> Report test failure with simple message.
