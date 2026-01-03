@@ -1,0 +1,36 @@
+# Fortran module files
+*.mod
+
+# log files
+*.log
+
+# Object files
+*.o
+*.obj
+
+# Executables
+*.exe
+*.out
+a.out
+
+# Build directories
+build/
+dist/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary files
+*~
+*.swp
+*.swo
+
+USAGE.md

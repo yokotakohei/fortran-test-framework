@@ -4,30 +4,57 @@ A Python-aided testing framework for Fortran with automated test discovery and e
 
 ## Features
 
--  **Assertions**: Support for integers, reals, doubles, logicals, strings, and arrays
--  **Error stop detection**: Automatically detect and handle `error stop` in tests
--  **Auto-discovery**: Automatically finds and runs test files matching `test_*.f90` pattern
--  **Python runner**: Flexible test discovery and execution
+- ✅ **Assertions**: Support for integers, reals, doubles, logicals, strings, and arrays
+- ✅ **Error stop detection**: Automatically detect and handle `error stop` in tests
+- ✅ **Auto-discovery**: Automatically finds and runs test files matching `test_*.f90` pattern
+- ✅ **Python runner**: Flexible test discovery and execution
+- ✅ **Build system integration**: Works with CMake and FPM
+
+## Architecture
+
+fortest consists of two components:
+
+1. **Python runner** (installed via pip): Test discovery and execution engine
+2. **Fortran assertions** (installed via CMake/FPM): Assertion functions used in test code
 
 ## Installation
 
-### Prerequisites
-
-- Python 3.12 or later
-- A Fortran compiler (gfortran recommended)
-
-### Install from PyPI
+### 1. Install Python Runner
 
 ```bash
 pip install fortest
 ```
 
-### Install from source
+### 2. Install Fortran Assertions
 
-```bash
-git clone https://github.com/yokotakohei/fortran-test-runner.git
-cd fortran-test-runner
-pip install -e .
+Choose one method based on your build system:
+
+#### Using CMake (FetchContent)
+
+Add to your `CMakeLists.txt`:
+
+```cmake
+include(FetchContent)
+
+FetchContent_Declare(
+    fortest-assertions
+    GIT_REPOSITORY https://github.com/yokotakohei/fortran-test-framework.git
+    GIT_TAG main
+    SOURCE_SUBDIR fortran
+)
+FetchContent_MakeAvailable(fortest-assertions)
+
+# Link to your test executable
+target_link_libraries(your_test PRIVATE fortest::assertions)
+```
+
+#### Using FPM
+
+Add to your `fpm.toml`:
+
+```toml
+[dependencies]
+fortest-assertions = { git = "https://github.com/yokotakohei/fortran-test-framework.git", path = "fortran" }
 ```
 
 ## Quick Start
@@ -155,16 +182,35 @@ Name your test file with `error_stop` in the filename, and fortest will:
 
 ## Examples
 
-See the `examples/` directory for complete examples:
+See the `examples/` directory for complete working examples with both CMake and FPM.
 
-- [examples/module_sample.f90](examples/module_sample.f90) - Sample module with basic functions
-- [examples/test_module_sample.f90](examples/test_module_sample.f90) - Test examples using assertions
-
-### Running Examples
+### CMake Example
 
 ```bash
 cd examples
-fortest
+mkdir build && cd build
+cmake ..
+make
+ctest
+```
+
+Or run with fortest:
+
+```bash
+fortest ../test/
+```
+
+### FPM Example
+
+```bash
+cd examples
+fpm test
+```
+
+Or run with fortest:
+
+```bash
+fortest test/
 ```
 
 ## Command Line Options

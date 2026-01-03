@@ -4,6 +4,9 @@ license = "MIT"
 author = "Kohei Yokota"
 copyright = "Copyright 2026 Kohei Yokota"
 
+[dependencies]
+fortest-assertions = { git = "https://github.com/yokotakohei/fortran-test-framework.git", path = "fortran" }
+
 [build]
 auto-executables = false
 auto-tests = false

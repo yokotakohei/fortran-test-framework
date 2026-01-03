@@ -1,27 +1,20 @@
 #!/usr/bin/env python3
 """
-fortest - Automated test runner for Fortran
-
-Usage:
-    fortest                          # Run all test_*.f90 files
-    fortest path/to/test_file.f90    # Run specific test file
-    fortest module_*.f90             # Run all module test files
-    fortest -v                       # Verbose mode
+Module providing implements the core functionality of fortest.
 """
 
-import argparse
 import glob
 import re
 import subprocess
-import sys
 import tempfile
 from dataclasses import dataclass
-from enum import Enum
-from importlib import resources
 from pathlib import Path
 
+from fortest.test_result import Colors, MessageTag, TestResult
+from fortest.exit_status import ExitStatus
 
-@dataclass
+
+@dataclass(frozen=True)
 class BuildSystemInfo:
     """
     Information about detected build system.
@@ -35,50 +28,6 @@ class BuildSystemInfo:
     """
     build_type: str
     project_dir: Path
-
-
-class Colors(Enum):
-    """
-    ANSI color codes for terminal output.
-    """
-    RED = "\033[31m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BLUE = "\033[34m"
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-
-
-class MessageTag(Enum):
-    """
-    Test result message tags.
-    """
-    PASS = "[PASS]"
-    FAIL = "[FAIL]"
-
-
-class TestResult:
-    """
-    Container for test execution results.
-
-    Attributes
-    ----------
-    name : str
-        Name of the test
-    passed : bool
-        Whether the test passed
-    message : str
-        Additional message about the test result
-    """
-    def __init__(
-        self,
-        name: str,
-        passed: bool,
-        message: str = "",
-    ) -> None:
-        self.name: str = name
-        self.passed: bool = passed
-        self.message: str = message
 
 
 class FortranTestRunner:
@@ -169,12 +118,13 @@ class FortranTestRunner:
             if p not in seen:
                 seen.add(p)
                 unique.append(p)
+
         return unique
 
 
     def find_module_files(self,
         test_file: Path,
-        output_dir: Path | None = None,
+        include_assertions: bool = True,
     ) -> list[Path]:
         """
         Find module dependencies for a test file.
@@ -183,8 +133,8 @@ class FortranTestRunner:
         ----------
         test_file : Path
             Path to the test file
-        output_dir : Path | None
-            Temporary directory where module files can be extracted
+        include_assertions : bool
+            Whether to include fortest_assertions (only for standalone mode)
 
         Returns
         -------
@@ -193,46 +143,59 @@ class FortranTestRunner:
         """
         modules: list[Path] = []
 
-        # Convert test_file to absolute path to determine project root
+        # Convert test_file to absolute path
         test_file_abs: Path = test_file.resolve()
 
-        # Try to find project root (contains fortest/ directory)
-        project_root: Path | None = None
-        current: Path = test_file_abs.parent
-        while current != current.parent:  # Stop at filesystem root
-            if (current / "fortest").exists():
-                project_root = current
-                break
-            current = current.parent
+        # Only include assertions for standalone compilation
+        if include_assertions:
+            # Search for module_fortest_assertions.f90 in common locations
+            # This is only used for standalone compilation (no build system)
+            search_paths: list[Path] = []
 
-        # Check for bundled assertions module (from package)
-        try:
-            fortest_pkg = resources.files("fortest")
-            assertions_resource = fortest_pkg / "module_fortest_assertions.f90"
+            # 1. Check relative to test file: ../src/, ../../src/, etc.
+            current: Path = test_file_abs.parent
+            for _ in range(3):  # Search up to 3 levels
+                src_candidate = current / "src"
+                if src_candidate.exists():
+                    search_paths.append(src_candidate)
+                current = current.parent
+                if current == current.parent:  # Reached filesystem root
+                    break
 
-            # Read the content and write to output directory
-            if hasattr(assertions_resource, "read_text") and output_dir is not None:
-                content = assertions_resource.read_text(encoding="utf-8")
-                temp_module_path = output_dir / "module_fortest_assertions.f90"
-                temp_module_path.write_text(content, encoding="utf-8")
-                modules.append(temp_module_path)
-        except (ImportError, AttributeError, TypeError, Exception):
-            # Fallback: look in project root if not installed as package
-            if project_root is None:
-                project_root = Path.cwd()
+            # 2. For fortest development: check fortran/src/
+            dev_path = test_file_abs
+            for _ in range(5):  # Search up to 5 levels for dev environment
+                if (dev_path / "fortran" / "src").exists():
+                    search_paths.append(dev_path / "fortran" / "src")
+                    break
+                dev_path = dev_path.parent
+                if dev_path == dev_path.parent:
+                    break
 
-            fortest_module: Path = project_root / "fortest" / "module_fortest_assertions.f90"
-            if fortest_module.exists():
-                modules.append(fortest_module)
+            # 3. Search in all candidate paths
+            for search_path in search_paths:
+                fortest_module = search_path / "module_fortest_assertions.f90"
+                if fortest_module.exists():
+                    modules.append(fortest_module)
+                    if self.verbose:
+                        print(f"Using assertions from: {fortest_module}")
+                    break  # Use first found
 
-        # Check for other module dependencies in examples/ (recursively)
-        if project_root is None:
-            project_root = Path.cwd()
-        examples_dir: Path = project_root / "examples"
-        if examples_dir.exists():
-            for mod_file in examples_dir.rglob("module_*.f90"):
-                if mod_file.resolve() != test_file_abs:
+        # Find user's module dependencies in nearby directories
+        search_dirs: list[Path] = [test_file_abs.parent]
+
+        # Check src/ directory relative to test directory
+        src_dir: Path = test_file_abs.parent.parent / "src"
+        if src_dir.exists() and src_dir.is_dir():
+            search_dirs.append(src_dir)
+
+        # Search for module_*.f90 files (user modules, not test modules)
+        for search_dir in search_dirs:
+            for mod_file in search_dir.glob("module_*.f90"):
+                if mod_file.resolve() != test_file_abs and "test" not in mod_file.stem:
                     modules.append(mod_file)
+                    if self.verbose:
+                        print(f"Found dependency: {mod_file}")
 
         return modules
 
@@ -309,9 +272,8 @@ class FortranTestRunner:
         return test_subroutines
 
 
-    def separate_error_stop_tests(
-        self,
-        test_subroutines: list[str],
+    def separate_error_stop_tests(self,
+        test_subroutines: list[str]
     ) -> tuple[list[str], list[str]]:
         """
         Separate normal tests from error_stop tests.
@@ -366,13 +328,13 @@ class FortranTestRunner:
         program_content: str = f"program run_{test_file.stem}\n"
         program_content += "    use fortest_assertions\n"
         program_content += f"    use {test_module_name}\n"
-        program_content += "    implicit none\n\n"
+        program_content += "    implicit none\n"
 
         # Call all test subroutines
         for test_sub in test_subroutines:
             program_content += f"    call {test_sub}()\n"
 
-        program_content += "\n    call print_summary()\n"
+        program_content += "    call print_summary()\n"
         program_content += f"end program run_{test_file.stem}\n"
 
         generated_file: Path = output_dir / f"gen_runner_{test_file.name}"
@@ -387,7 +349,6 @@ class FortranTestRunner:
 
     def generate_error_stop_test_program(
         self,
-        test_file: Path,
         test_module_name: str,
         test_subroutine: str,
         output_dir: Path,
@@ -397,8 +358,6 @@ class FortranTestRunner:
 
         Parameters
         ----------
-        test_file : Path
-            Path to the test file
         test_module_name : str
             Name of the test module
         test_subroutine : str
@@ -443,22 +402,22 @@ class FortranTestRunner:
         """
         # Start from test file directory and search upwards
         current: Path = test_file.resolve().parent
-        
+
         while current != current.parent:  # Stop at filesystem root
             # Check for CMakeLists.txt
             if (current / "CMakeLists.txt").exists():
                 return BuildSystemInfo("cmake", current)
-            
+
             # Check for fpm.toml
             if (current / "fpm.toml").exists():
                 return BuildSystemInfo("fpm", current)
-            
+
             # Check for Makefile
             if (current / "Makefile").exists():
                 return BuildSystemInfo("make", current)
-            
+
             current = current.parent
-        
+
         return None
 
 
@@ -480,16 +439,16 @@ class FortranTestRunner:
         """
         build_type: str = build_info.build_type
         project_dir: Path = build_info.project_dir
-        
+
         if self.verbose:
             print(f"Detected {build_type} build system in {project_dir}")
-        
+
         try:
             if build_type == "cmake":
                 # Build with CMake
                 build_dir: Path = project_dir / "build"
                 build_dir.mkdir(exist_ok=True)
-                
+
                 # Run cmake configuration
                 subprocess.run(
                     ["cmake", ".."],
@@ -498,7 +457,7 @@ class FortranTestRunner:
                     text=True,
                     check=True,
                 )
-                
+
                 # Build
                 subprocess.run(
                     ["make"],
@@ -507,7 +466,7 @@ class FortranTestRunner:
                     text=True,
                     check=True,
                 )
-                
+
                 # Find the test executable
                 # Try common naming patterns
                 test_stem: str = test_file.stem
@@ -516,16 +475,16 @@ class FortranTestRunner:
                     f"test_{test_stem.replace('test_', '')}",
                     "test_sample_module",  # fallback for examples
                 ]
-                
+
                 for name in possible_names:
                     executable: Path = build_dir / name
                     if executable.exists():
                         return executable
-                
+
                 if self.verbose:
                     print(f"Warning: Could not find test executable in {build_dir}")
                 return None
-                
+
             elif build_type == "fpm":
                 # Build with FPM
                 subprocess.run(
@@ -535,7 +494,7 @@ class FortranTestRunner:
                     text=True,
                     check=True,
                 )
-                
+
                 # FPM puts test executables in build/gfortran_*/test/
                 build_dir = project_dir / "build"
                 for test_dir in build_dir.glob("gfortran_*/test"):
@@ -543,11 +502,11 @@ class FortranTestRunner:
                     executable = test_dir / test_stem
                     if executable.exists():
                         return executable
-                
+
                 if self.verbose:
                     print(f"Warning: Could not find test executable in {build_dir}")
                 return None
-                
+
             elif build_type == "make":
                 # Build with Make
                 subprocess.run(
@@ -557,7 +516,7 @@ class FortranTestRunner:
                     text=True,
                     check=True,
                 )
-                
+
                 # Look for test executable in common locations
                 test_stem = test_file.stem
                 possible_paths: list[Path] = [
@@ -565,15 +524,15 @@ class FortranTestRunner:
                     project_dir / "build" / test_stem,
                     project_dir / f"test_{test_stem.replace('test_', '')}",
                 ]
-                
+
                 for executable in possible_paths:
                     if executable.exists():
                         return executable
-                
+
                 if self.verbose:
                     print(f"Warning: Could not find test executable")
                 return None
-                
+
         except subprocess.CalledProcessError as e:
             print(
                 f"{Colors.RED.value}Build failed with {build_type}"
@@ -586,7 +545,7 @@ class FortranTestRunner:
             if self.verbose:
                 print(f"Error during build: {e}")
             return None
-        
+
         return None
 
 
@@ -615,10 +574,11 @@ class FortranTestRunner:
             executable_built: Path | None = self.build_with_system(build_info, test_file)
             if executable_built is not None:
                 return executable_built
+
             # If build system detected but failed, fall back to direct compilation
             if self.verbose:
                 print("Falling back to direct compilation with gfortran")
-        
+
         # Check if this is an error_stop test (standalone program)
         with open(test_file, "r") as f:
             content: str = f.read()
@@ -674,8 +634,8 @@ class FortranTestRunner:
             )
             return None
 
-        # Find module dependencies
-        module_files: list[Path] = self.find_module_files(test_file, output_dir)
+        # Find module dependencies (including assertions for standalone mode)
+        module_files: list[Path] = self.find_module_files(test_file, include_assertions=True)
 
         # Generate main program
         main_program: Path = self.generate_test_program(
@@ -715,10 +675,7 @@ class FortranTestRunner:
             return None
 
 
-    def run_test_executable(
-        self,
-        executable: Path,
-    ) -> tuple[bool, str, int]:
+    def run_test_executable(self, executable: Path) -> tuple[bool, str, int]:
         """
         Run a compiled test executable.
 
@@ -746,10 +703,7 @@ class FortranTestRunner:
             return False, str(e), -1
 
 
-    def parse_test_output(
-        self,
-        output: str,
-    ) -> list[TestResult]:
+    def parse_test_output(self, output: str) -> list[TestResult]:
         """
         Parse the output from a test run.
 
@@ -785,11 +739,7 @@ class FortranTestRunner:
         return results
 
 
-    def check_error_stop_test(
-        self,
-        test_file: Path,
-        output_dir: Path,
-    ) -> list[TestResult]:
+    def check_error_stop_test(self, test_file: Path, output_dir: Path) -> list[TestResult]:
         """
         Handle tests that are expected to call error stop.
 
@@ -847,11 +797,7 @@ class FortranTestRunner:
         return results
 
 
-    def _handle_error_stop_test(
-        self,
-        test_file: Path,
-        output_dir: Path,
-    ) -> list[TestResult]:
+    def _handle_error_stop_test(self, test_file: Path, output_dir: Path) -> list[TestResult]:
         """
         Handle error_stop test execution and printing.
 
@@ -895,7 +841,6 @@ class FortranTestRunner:
     def _handle_normal_test(self, test_file: Path, output_dir: Path) -> list[TestResult]:
         """
         Handle normal test execution and printing.
-
         Separates error_stop tests and runs them individually.
 
         Parameters
@@ -935,7 +880,7 @@ class FortranTestRunner:
         # Run normal tests together
         if normal_tests:
             # Find module dependencies
-            module_files: list[Path] = self.find_module_files(test_file, output_dir)
+            module_files: list[Path] = self.find_module_files(test_file)
 
             # Generate main program for normal tests
             main_program: Path = self.generate_test_program(
@@ -999,7 +944,7 @@ class FortranTestRunner:
             # Count pass/fail for error_stop tests
             error_stop_passed: int = sum(1 for r in error_stop_results if r.passed)
             error_stop_failed: int = len(error_stop_results) - error_stop_passed
-                        
+
             # Print individual results
             for result in error_stop_results:
                 if result.passed:
@@ -1014,7 +959,7 @@ class FortranTestRunner:
                     )
                     if result.message:
                         print(f"       {result.message}")
-            
+
             separator: str = "=" * 50
             print()
             print(separator)
@@ -1054,11 +999,10 @@ class FortranTestRunner:
             Test result
         """
         # Find module dependencies
-        module_files: list[Path] = self.find_module_files(test_file, output_dir)
+        module_files: list[Path] = self.find_module_files(test_file)
 
         # Generate standalone program for this error_stop test
         error_program: Path = self.generate_error_stop_test_program(
-            test_file,
             test_module_name,
             test_subroutine,
             output_dir,
@@ -1089,7 +1033,7 @@ class FortranTestRunner:
             )
 
         # Run and check for error stop
-        _, output, returncode = self.run_test_executable(executable)
+        _, _, returncode = self.run_test_executable(executable)
 
         # error stop should cause non-zero return code
         # gfortran can return 1, 2, or other non-zero codes depending on version/platform
@@ -1107,10 +1051,7 @@ class FortranTestRunner:
             )
 
 
-    def run_tests(
-        self,
-        test_files: list[Path],
-    ) -> None:
+    def run_tests(self, test_files: list[Path]) -> None:
         """
         Run all test files.
 
@@ -1154,9 +1095,7 @@ class FortranTestRunner:
                 print()
 
 
-    def print_summary(
-        self,
-    ) -> int:
+    def print_summary(self) -> int:
         """
         Print final test summary.
 
@@ -1176,87 +1115,7 @@ class FortranTestRunner:
 
         if self.failed_tests == 0 and self.total_tests > 0:
             print(f"\n{Colors.GREEN.value}{Colors.BOLD.value}All tests passed! ✓{Colors.RESET.value}")
-            return 0
+            return ExitStatus.SUCCESS.value
         else:
             print(f"\n{Colors.RED.value}{Colors.BOLD.value}Some tests failed ✗{Colors.RESET.value}")
-            return 1
-
-
-def get_arguments() -> argparse.Namespace:
-    """
-    Parse command line arguments.
-
-    Returns
-    -------
-    argparse.Namespace
-        Parsed command line arguments
-    """
-    parser: argparse.ArgumentParser = argparse.ArgumentParser(
-        description="fortest - Automated test runner for Fortran",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  fortest                              # Run all test_*.f90 files
-  fortest examples/module_test_sample.f90  # Run specific test file
-  fortest "module_test_*.f90"          # Run all module test files
-  fortest -v                           # Verbose output
-        """,
-    )
-    parser.add_argument(
-        "pattern",
-        nargs="?",
-        default="test_*.f90",
-        help="Test file pattern or specific file (default: test_*.f90)",
-    )
-    parser.add_argument(
-        "--compiler",
-        default="gfortran",
-        help="Fortran compiler to use (default: gfortran)",
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Verbose output",
-    )
-    parser.add_argument(
-        "--build-dir",
-        type=Path,
-        help="Build directory (default: temporary directory)",
-    )
-
-    return parser.parse_args()
-
-
-def main() -> int:
-    """
-    Main entry point for ftest runner.
-
-    Returns
-    -------
-    int
-        Exit code
-    """
-    args: argparse.Namespace = get_arguments()
-
-    runner: FortranTestRunner = FortranTestRunner(
-        compiler=args.compiler,
-        verbose=args.verbose,
-        build_dir=args.build_dir,
-    )
-
-    test_files: list[Path] = runner.find_test_files(args.pattern)
-
-    if not test_files:
-        print(
-            f"{Colors.YELLOW.value}No test files matching '{args.pattern}' found"
-            f"{Colors.RESET.value}"
-        )
-        return 1
-
-    runner.run_tests(test_files)
-    return runner.print_summary()
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+            return ExitStatus.ERROR.value

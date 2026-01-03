@@ -23,15 +23,11 @@ classifiers = [
 ]
 
 [project.scripts]
-fortest = "fortest.runner:main"
+fortest = "fortest_cli.main:main"
 
 [project.urls]
-Homepage = "https://github.com/yokotakohei/fortran-test-runner"
-Repository = "https://github.com/yokotakohei/fortran-test-runner"
+Homepage = "https://github.com/yokotakohei/fortran-test-framework"
+Repository = "https://github.com/yokotakohei/fortran-test-framework"
 
 [tool.setuptools.packages.find]
-where = ["."]  
-include = ["fortest*"]
-
-[tool.setuptools.package-data]
-fortest = ["*.f90"]
+where = ["."]
