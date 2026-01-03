@@ -1631,10 +1631,12 @@ class FortranTestRunner:
         print(f"{Colors.BOLD.value}Running Fortran tests...{Colors.RESET.value}\n")
 
         # Create temporary directory for executables
+        separator: str = "-" * 60
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir: Path = Path(tmpdir)
 
             for test_file in test_files:
+                print(separator)
                 print(f"{Colors.BLUE.value}Testing: {test_file}{Colors.RESET.value}")
 
                 # Check if this is an error_stop test
@@ -1668,14 +1670,16 @@ class FortranTestRunner:
         int
             Exit code (0 if all tests passed, 1 otherwise)
         """
-        separator: str = "=" * 50
+        separator: str = "-" * 60
+        separator_table: str = "=" * 50
 
-        print("All tests completed.")
         print(separator)
+        print("All tests completed.")
+        print(separator_table)
         print(f"Total tests: {self.total_tests}")
         print(f"{Colors.GREEN.value}{MessageTag.PASS.value}{self.passed_tests:>4}{Colors.RESET.value}")
         print(f"{Colors.RED.value}{MessageTag.FAIL.value}{self.failed_tests:>4}{Colors.RESET.value}")
-        print(separator)
+        print(separator_table)
 
         if self.failed_tests == 0 and self.total_tests > 0:
             print(f"\n{Colors.GREEN.value}{Colors.BOLD.value}All tests passed! ✓{Colors.RESET.value}")

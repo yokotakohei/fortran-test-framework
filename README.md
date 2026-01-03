@@ -92,7 +92,6 @@ end module sample_module
 
 ### 2. Write your tests
 
-
 ```fortran
 ! test_module_sample.f90
 module test_sample_module
@@ -249,16 +248,20 @@ Options:
 Running Fortran tests...
 
 Testing: examples/test/test_module_sample.f90
- [PASS] add_integers(2, 3) should return 5
- [PASS] multiply_real(0.0, 100.0) should return 0.0
- [PASS] divide_integer(4, 2) should return 2
- [PASS] is_positive(42) should return true
- [PASS] is_positive(-7) should return false
+[PASS] add_integers(2, 3) should return 5
+[PASS] multiply_real(0.0, 100.0) should return 0.0
+[FAIL] multiply_real(0.0, 100.0) should return 0.0
+       expected = 1.00000000 vs actual = 0.00000000
+[PASS] divide_integer(4, 2) should return 2
+[FAIL] test_divide_integer_zero_division_fail
+       Test caused error stop or abnormal termination (exit code 1)
+[PASS] is_positive(42) should return true
+[PASS] is_positive(-7) should return false
 
 ==================================================
-Total tests: 5
-[PASS]    5
-[FAIL]    0
+Normal tests: 6
+[PASS]   4
+[FAIL]   2
 ==================================================
 
 [PASS] test_error_stop_divide_integer_zero_division
@@ -272,12 +275,12 @@ error_stop tests: 1
 
 All tests completed.
 ==================================================
-Total tests: 6
-[PASS]   6
-[FAIL]   0
+Total tests: 7
+[PASS]   5
+[FAIL]   2
 ==================================================
 
-All tests passed! ✓
+Some tests failed ✗
 ```
 
 
