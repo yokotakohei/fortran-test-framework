@@ -16,7 +16,7 @@ def runner() -> FortranTestRunner:
     return FortranTestRunner(verbose=False)
 
 
-def write_file(path: Path, content: str):
+def write_file(path: Path, content: str) -> None:
     """
     Write a content to a file.
     """
@@ -24,111 +24,10 @@ def write_file(path: Path, content: str):
     path.write_text(content)
 
 
-def test_extract_module_name(tmp_path, runner):
-    """
-    Test extract_module_name.
-    Check if a module name can be extracted as lower case.
-    """
-    f = tmp_path / "test_mod.f90"
-    write_file(f, "  module My_Module \n end module My_Module \n")
-    name = runner.extract_module_name(f)
-    assert name == "my_module"
-
-
-def test_extract_test_subroutines(tmp_path, runner):
-    """
-    Test extract_test_subroutines.
-    Check if defined test subroutines are extracted.
-    """
-    f = tmp_path / "test_sample.f90"
-    content = """
-module test_sample
-contains
-function test_dummy_func() return(y)
-integer :: y
-y = 0
-end
-subroutine dummy_subroutine()
-end subroutine
- subroutine test_one() 
-end subroutine test_one
-! comment subroutine test_ignore()
-subroutine test_two() ! subroutine
-end subroutine test_two
-end module test_sample
-"""
-    write_file(f, content)
-    subs = runner.extract_test_subroutines(f)
-    assert "test_one" in subs
-    assert "test_two" in subs
-    assert len(subs) == 2
-
-
-def test_separate_error_stop_tests(runner):
-    """
-    Test separate_error_stop_tests.
-    Check if test names are correctly separated.
-    """
-    names = ["test_ok", "test_error_stop_div", "test_another_error_stop"]
-    normal, errors = runner.separate_error_stop_tests(names)
-    assert normal == ["test_ok"]
-    assert set(errors) == {"test_error_stop_div", "test_another_error_stop"}
-
-
-def test_generate_test_program(tmp_path, runner):
-    """
-    Test generate_test_program.
-    Check if a correct test code is generated.
-    """
-    test_file = tmp_path / "test_module_sample.f90"
-    test_file.write_text("")
-    out = runner.generate_test_program(test_file, "test_module_sample", ["test_a", "test_b"], tmp_path)
-    text = out.read_text()
-    correct = """program run_test_module_sample
-    use fortest_assertions
-    use test_module_sample
-    implicit none
-    call test_a()
-    call test_b()
-    call print_summary()
-end program run_test_module_sample\n"""
-
-    assert correct == text
-
-
-def test_find_module_files_finds_assertions_and_user_modules(tmp_path, runner):
-    """
-    Test find_module_files.
-    Check if the function finds assertion and modules.
-    """
-    # Create project layout
-    project = tmp_path
-    (project / "fortran" / "src").mkdir(parents=True)
-    assertions = project / "fortran" / "src" / "module_fortest_assertions.f90"
-    assertions.write_text("module fortest_assertions\nend module fortest_assertions\n")
-
-    # examples/src and examples/test
-    (project / "examples" / "src").mkdir(parents=True)
-    (project / "examples" / "test").mkdir(parents=True)
-    user_mod = project / "examples" / "src" / "module_sample.f90"
-    user_mod.write_text("module module_sample\nend module module_sample\n")
-
-    test_file = project / "examples" / "test" / "test_module_sample.f90"
-    test_file.write_text("module test_module_sample\nend module test_module_sample\n")
-
-    found = runner.find_module_files(test_file)
-
-    # Should find both assertions and user module
-    found_names = [p.name for p in found]
-    assert len(found_names) == 2
-    assert "module_fortest_assertions.f90" in found_names
-    assert "module_sample.f90" in found_names
-
-
-def test_find_test_files(tmp_path, runner):
+def test_find_test_files(tmp_path: Path, runner: FortranTestRunner) -> None:
     """
     Tests find_test_files.
-    Check if lists of test file names are generated.
+    Verify that it generates list of test file names.
     """
     d = tmp_path / "tests"
     (d).mkdir()
@@ -144,6 +43,472 @@ def test_find_test_files(tmp_path, runner):
 
     # Should find both files
     names = [p.name for p in res]
-    assert len(names) == 2
-    assert "test_one.f90" in names
-    assert "module_test_two.f90" in names
+    assert names == ["test_one.f90", "module_test_two.f90"]
+
+
+def test__build_search_directories(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _build_search_directories.
+    Verify that it finds common FPM/CMake directory structures.
+    """
+    # Create directory structure
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    (project / "app").mkdir(parents=True)
+    (project / "lib").mkdir(parents=True)
+    (project / "test").mkdir(parents=True)
+    (project / "fortran" / "src").mkdir(parents=True)
+
+    test_file = project / "test" / "test_sample.f90"
+    test_file.write_text("module test_sample\nend module test_sample\n")
+
+    search_dirs = runner._build_search_directories(test_file)
+
+    # Should find src, app, lib, fortran/src, and test directories
+    dir_names = {str(d.relative_to(project)) for d in search_dirs if project in d.parents or d == project or d.parent == project}
+    expected_dirs = {".", "src", "app", "lib", "test", str(Path("fortran") / "src")}
+
+    assert dir_names == expected_dirs
+
+
+def test__find_assertion_module(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _find_assertion_module.
+    Verify that it finds module_fortest_assertions.f90.
+    """
+    # Create directory with assertions module
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    assertions_file = src_dir / "module_fortest_assertions.f90"
+    assertions_file.write_text("module fortest_assertions\nend module fortest_assertions\n")
+
+    search_dirs = [src_dir]
+    found = runner._find_assertion_module(search_dirs)
+
+    assert found is not None
+    assert found.name == "module_fortest_assertions.f90"
+    assert found == assertions_file
+
+
+def test__find_user_modules(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _find_user_modules.
+    Verify that it finds user modules while skipping intrinsic and assertion modules.
+    """
+    # Create directory structure
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+
+    # Create user modules
+    module_a = src_dir / "module_a.f90"
+    module_a.write_text("module module_a\nend module module_a\n")
+
+    module_b = src_dir / "module_b.f90"
+    module_b.write_text("module module_b\nend module module_b\n")
+
+    # Create test file
+    test_dir = tmp_path / "test"
+    test_dir.mkdir()
+    test_file = test_dir / "test_sample.f90"
+    test_file.write_text("module test_sample\nend module test_sample\n")
+
+    # Test with various module names
+    used_modules = [
+        "iso_fortran_env",  # intrinsic - should be skipped
+        "fortest_assertions",  # assertion - should be skipped
+        "module_a",  # user module - should be found
+        "module_b",  # user module - should be found
+    ]
+
+    search_dirs = [src_dir]
+    found_modules = runner._find_user_modules(used_modules, search_dirs, test_file)
+
+    # Should find only user modules
+    found_names = {f.stem for f in found_modules}
+    assert found_names == {"module_a", "module_b"}
+
+
+def test_find_module_files_finds_assertions_and_user_modules(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test find_module_files.
+    Verify that it finds assertion and modules.
+    """
+    # Create project layout
+    project = tmp_path
+    (project / "fortran" / "src").mkdir(parents=True)
+    assertions = project / "fortran" / "src" / "module_fortest_assertions.f90"
+    assertions.write_text("module fortest_assertions\nend module fortest_assertions\n")
+
+    # examples/src and examples/test
+    (project / "examples" / "src").mkdir(parents=True)
+    (project / "examples" / "test").mkdir(parents=True)
+    user_mod = project / "examples" / "src" / "module_sample.f90"
+    user_mod.write_text("module module_sample\nend module module_sample\n")
+
+    test_file = project / "examples" / "test" / "test_module_sample.f90"
+    # Add use statements so find_module_files can discover dependencies
+    test_file.write_text("""module test_module_sample
+    use fortest_assertions
+    use module_sample
+end module test_module_sample
+""")
+
+    found = runner.find_module_files(test_file)
+
+    # Should find both assertions and user module
+    found_names = sorted([p.name for p in found])
+    assert found_names == ["module_fortest_assertions.f90", "module_sample.f90"]
+
+
+def test_extract_module_name(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test extract_module_name.
+    Verify that it extracts a module name as lower case.
+    """
+    f = tmp_path / "test_mod.f90"
+    write_file(f, "  module My_Module \n end module My_Module \n")
+    name = runner.extract_module_name(f)
+    assert name == "my_module"
+
+
+def test_extract_use_statements(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test extract_use_statements.
+    Verify that it extracts 'use' statements correctly.
+    Note: This function extracts all use statements including intrinsic modules.
+    Filtering is done in find_module_files.
+    """
+    f = tmp_path / "sample.f90"
+    content = """
+module sample
+    use iso_fortran_env
+    use :: module_a
+    use, intrinsic :: iso_c_binding
+    use module_b, only: func1, func2
+    ! use module_c (this is a comment)
+contains
+    subroutine test()
+        use module_d  ! inline use
+    end subroutine
+end module sample
+"""
+    write_file(f, content)
+    uses = runner.extract_use_statements(f)
+
+    # Should find all use statements (lowercase, unique), comment should be ignored
+    assert uses == ["iso_fortran_env", "module_a", "iso_c_binding", "module_b", "module_d"]
+
+
+def test_find_fortran_files_recursive(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test find_fortran_files_recursive.
+    Verify that it finds .f90 files recursively.
+    """
+    (tmp_path / "src" / "subdir1").mkdir(parents=True)
+    (tmp_path / "src" / "subdir2").mkdir(parents=True)
+
+    f1 = tmp_path / "src" / "mod1.f90"
+    f2 = tmp_path / "src" / "subdir1" / "mod2.f90"
+    f3 = tmp_path / "src" / "subdir2" / "mod3.f90"
+    f4 = tmp_path / "src" / "readme.txt"
+
+    f1.write_text("! mod1")
+    f2.write_text("! mod2")
+    f3.write_text("! mod3")
+    f4.write_text("readme")
+
+    files = runner.find_fortran_files_recursive(tmp_path / "src")
+    names = sorted([f.name for f in files])
+
+    assert names == ["mod1.f90", "mod2.f90", "mod3.f90"]
+
+
+def test_find_module_file_by_name(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test find_module_file_by_name.
+    Verify that it finds module files by module name.
+    """
+    (tmp_path / "src").mkdir()
+    (tmp_path / "lib").mkdir()
+
+    # Create files with modules
+    f1 = tmp_path / "src" / "my_module.f90"
+    f1.write_text("module my_awesome_module\nend module")
+
+    f2 = tmp_path / "lib" / "util.f90"
+    f2.write_text("module utilities\nend module utilities")
+
+    # Search for modules
+    search_dirs = [tmp_path / "src", tmp_path / "lib"]
+
+    found1 = runner.find_module_file_by_name("my_awesome_module", search_dirs)
+    assert found1 is not None
+    assert found1.name == "my_module.f90"
+
+    found2 = runner.find_module_file_by_name("utilities", search_dirs)
+    assert found2 is not None
+    assert found2.name == "util.f90"
+
+    not_found = runner.find_module_file_by_name("nonexistent", search_dirs)
+    assert not_found is None
+
+
+def test_extract_test_subroutines(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test extract_test_subroutines.
+    Verify that it extracts test subroutines.
+    """
+    f = tmp_path / "test_sample.f90"
+    content = """
+module test_sample
+contains
+function test_dummy_func() return(y)
+integer :: y
+y = 0
+end
+subroutine dummy_subroutine()
+end subroutine
+ subroutine test_one()
+end subroutine test_one
+! comment subroutine test_ignore()
+! subroutine test_ignore()
+subroutine test_two() ! subroutine
+end subroutine test_two
+end module test_sample
+"""
+    write_file(f, content)
+    subs = runner.extract_test_subroutines(f)
+    assert subs == ["test_one", "test_two"]
+
+
+def test_separate_error_stop_tests(runner: FortranTestRunner) -> None:
+    """
+    Test separate_error_stop_tests.
+    Verify that it separates test names correctly.
+    """
+    names = ["test_ok", "test_error_stop_div", "test_another_error_stop"]
+    normal, errors = runner.separate_error_stop_tests(names)
+    assert normal == ["test_ok"]
+    assert errors == ["test_error_stop_div", "test_another_error_stop"]
+
+
+def test_generate_test_program(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test generate_test_program.
+    Verify that it generates a correct test code.
+    """
+    test_file = tmp_path / "test_module_sample.f90"
+    test_file.write_text("")
+    out = runner.generate_test_program(test_file, "test_module_sample", ["test_a", "test_b"], tmp_path)
+    text = out.read_text()
+    expected = """program run_test_module_sample
+    use fortest_assertions
+    use test_module_sample
+    implicit none
+    call test_a()
+    call test_b()
+    call print_summary()
+end program run_test_module_sample\n"""
+
+    assert text == expected
+
+
+def test_generate_error_stop_test_program(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test generate_error_stop_test_program.
+    Verify that it generates error_stop test program correctly.
+    """
+    out = runner.generate_error_stop_test_program(
+        "test_module",
+        "test_error_stop_divide_by_zero",
+        tmp_path
+    )
+    text = out.read_text()
+    expected = """program run_test_error_stop_divide_by_zero
+    use test_module
+    implicit none
+    call test_error_stop_divide_by_zero()
+end program run_test_error_stop_divide_by_zero\n"""
+
+    assert text == expected
+
+
+def test__find_cmake_executable(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _find_cmake_executable.
+    Verify that it finds test executables in CMake build directories.
+    """
+    # Create CMake build directory
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    # Create test file
+    test_file = tmp_path / "test_sample.f90"
+    test_file.write_text("")
+
+    # Create executable with exact test name
+    executable = build_dir / "test_sample"
+    executable.touch()
+
+    found = runner._find_cmake_executable(build_dir, test_file)
+    assert found is not None
+    assert found == executable
+
+
+def test__find_cmake_executable_with_alternative_name(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _find_cmake_executable with alternative naming.
+    Verify that it finds executables with test_ prefix variations.
+    """
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    test_file = tmp_path / "test_sample.f90"
+    test_file.write_text("")
+
+    # Create executable with alternative naming (test_ prefix added)
+    executable = build_dir / "test_sample"
+    executable.touch()
+
+    found = runner._find_cmake_executable(build_dir, test_file)
+    assert found is not None
+    assert found == executable
+
+
+def test__find_cmake_executable_not_found(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _find_cmake_executable when executable is not found.
+    Verify that it returns None.
+    """
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    test_file = tmp_path / "test_nonexistent.f90"
+    test_file.write_text("")
+
+    found = runner._find_cmake_executable(build_dir, test_file)
+    assert found is None
+
+
+def test__find_fpm_executable(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _find_fpm_executable.
+    Verify that it finds test executables in FPM build directories.
+    """
+    # Create FPM build directory structure
+    project_dir = tmp_path
+    test_dir = project_dir / "build" / "gfortran_debug" / "test"
+    test_dir.mkdir(parents=True)
+
+    test_file = tmp_path / "test_sample.f90"
+    test_file.write_text("")
+
+    # Create executable
+    executable = test_dir / "test_sample"
+    executable.touch()
+
+    found = runner._find_fpm_executable(project_dir, test_file)
+    assert found is not None
+    assert found == executable
+
+
+def test__find_fpm_executable_not_found(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _find_fpm_executable when executable is not found.
+    Verify that it returns None.
+    """
+    project_dir = tmp_path
+    (project_dir / "build").mkdir()
+
+    test_file = tmp_path / "test_nonexistent.f90"
+    test_file.write_text("")
+
+    found = runner._find_fpm_executable(project_dir, test_file)
+    assert found is None
+
+
+def test__find_make_executable(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _find_make_executable.
+    Verify that it finds test executables in Make project directories.
+    """
+    project_dir = tmp_path
+
+    test_file = project_dir / "test_sample.f90"
+    test_file.write_text("")
+
+    # Create executable in project root
+    executable = project_dir / "test_sample"
+    executable.touch()
+
+    found = runner._find_make_executable(project_dir, test_file)
+    assert found is not None
+    assert found == executable
+
+
+def test__find_make_executable_in_build_dir(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _find_make_executable with build subdirectory.
+    Verify that it finds executables in build/ directory.
+    """
+    project_dir = tmp_path
+    build_dir = project_dir / "build"
+    build_dir.mkdir()
+
+    test_file = project_dir / "test_sample.f90"
+    test_file.write_text("")
+
+    # Create executable in build directory
+    executable = build_dir / "test_sample"
+    executable.touch()
+
+    found = runner._find_make_executable(project_dir, test_file)
+    assert found is not None
+    assert found == executable
+
+
+def test__find_make_executable_not_found(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _find_make_executable when executable is not found.
+    Verify that it returns None.
+    """
+    project_dir = tmp_path
+
+    test_file = project_dir / "test_nonexistent.f90"
+    test_file.write_text("")
+
+    found = runner._find_make_executable(project_dir, test_file)
+    assert found is None
+
+
+def test__is_standalone_program_with_program_statement(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _is_standalone_program with program statement.
+    Verify that it detects standalone programs.
+    """
+    test_file = tmp_path / "test_sample.f90"
+    test_file.write_text("program test_sample\nend program test_sample\n")
+
+    assert runner._is_standalone_program(test_file) is True
+
+
+def test__is_standalone_program_with_error_stop_in_name(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _is_standalone_program with error_stop in filename.
+    Verify that it detects error_stop tests.
+    """
+    test_file = tmp_path / "test_error_stop_division.f90"
+    test_file.write_text("module test_error_stop_division\nend module\n")
+
+    assert runner._is_standalone_program(test_file) is True
+
+
+def test__is_standalone_program_with_module(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _is_standalone_program with module-based test.
+    Verify that it returns False for module-based tests.
+    """
+    test_file = tmp_path / "test_sample.f90"
+    test_file.write_text("module test_sample\nend module test_sample\n")
+
+    assert runner._is_standalone_program(test_file) is False

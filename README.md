@@ -1,14 +1,16 @@
-# fortest - A Python-aided Testing Framework for Fortran
+# fortest - Testing Framework for Fortran
 
-A Python-aided testing framework for Fortran with automated test discovery and execution.
+A testing framework for Fortran with automated test discovery and execution, powered by Python.
+
 
 ## Features
 
-- ✅ **Assertions**: Support for integers, reals, doubles, logicals, strings, and arrays
-- ✅ **Error stop detection**: Automatically detect and handle `error stop` in tests
-- ✅ **Auto-discovery**: Automatically finds and runs test files matching `test_*.f90` pattern
-- ✅ **Python runner**: Flexible test discovery and execution
-- ✅ **Build system integration**: Works with CMake and FPM
+- Assertion functions for integers, reals, doubles, logicals, strings, and arrays
+- Automatic detection and handling of error stop in tests
+- Automatic test discovery for files matching `test_*.f90` pattern
+- Python-based test runner for flexible test discovery and execution
+- Integration with CMake and FPM build systems
+
 
 ## Architecture
 
@@ -17,12 +19,13 @@ fortest consists of two components:
 1. **Python runner** (installed via pip): Test discovery and execution engine
 2. **Fortran assertions** (installed via CMake/FPM): Assertion functions used in test code
 
+
 ## Installation
 
 ### 1. Install Python Runner
 
 ```bash
-pip install fortest
+pip install -e fortest/
 ```
 
 ### 2. Install Fortran Assertions
@@ -57,7 +60,16 @@ Add to your `fpm.toml`:
 fortest-assertions = { git = "https://github.com/yokotakohei/fortran-test-framework.git", path = "fortran" }
 ```
 
+
 ## Quick Start
+
+### Test File Naming
+
+fortest automatically discovers test files matching these patterns:
+- `test_*.f90`
+- `module_test_*.f90`
+
+Files containing `error_stop` in their name are treated as error-stop tests (see section [Testing Error Stops](#Testing Error Stops)).
 
 ### 1. Write your Fortran code
 
@@ -138,7 +150,7 @@ call assert_equal(actual_dp, expected_dp, "test name", tol=1.0d-12)
 ! Logical comparison
 call assert_equal(actual_bool, expected_bool, "test name")
 
-! String comparison
+! Character comparison
 call assert_equal(actual_str, expected_str, "test name")
 
 ! Logical assertions
@@ -158,6 +170,7 @@ call assert_array_equal(actual_arr, expected_arr, "test name", tol=1.0e-6)
 ! Double precision array
 call assert_array_equal(actual_arr_dp, expected_arr_dp, "test name", tol=1.0d-12)
 ```
+
 
 ## Testing Error Stops
 
@@ -179,6 +192,7 @@ Name your test file with `error_stop` in the filename, and fortest will:
 1. Detect that the test caused an error stop
 2. Mark the test as **PASSED** (because error stop was expected)
 3. Continue running other tests
+
 
 ## Examples
 
@@ -228,35 +242,44 @@ Options:
   -h, --help          Show help message
 ```
 
-## Test File Naming
-
-fortest automatically discovers test files matching these patterns:
-- `test_*.f90`
-- `module_test_*.f90`
-
-Files containing `error_stop` in their name are treated as error-stop tests.
 
 ## Output Example
 
 ```
 Running Fortran tests...
 
-Testing: examples/test_module_sample.f90
-[PASS] test_add_integers: 2 + 3 = 5
-[PASS] test_add_integers: -1 + 1 = 0
-[PASS] test_multiply_real: 2.0 * 3.0 = 6.0
-[PASS] test_divide_integer: 6 / 2 = 3
+Testing: examples/test/test_module_sample.f90
+ [PASS] add_integers(2, 3) should return 5
+ [PASS] multiply_real(0.0, 100.0) should return 0.0
+ [PASS] divide_integer(4, 2) should return 2
+ [PASS] is_positive(42) should return true
+ [PASS] is_positive(-7) should return false
 
 ==================================================
-Test Summary
-==================================================
-Total tests:     4
-Passed:          4
-Failed:          0
+Total tests: 5
+[PASS]    5
+[FAIL]    0
 ==================================================
 
-All tests passed ✓
+[PASS] test_error_stop_divide_integer_zero_division
+
+==================================================
+error_stop tests: 1
+[PASS]   1
+[FAIL]   0
+==================================================
+
+
+All tests completed.
+==================================================
+Total tests: 6
+[PASS]   6
+[FAIL]   0
+==================================================
+
+All tests passed! ✓
 ```
+
 
 ## Contributing
 
@@ -268,9 +291,8 @@ MIT License
 
 ## Author
 
-yokotakohei
+Kohei Yokota
 
 ## Repository
 
-[fortran-test-runner on GitHub](https://github.com/yokotakohei/fortran-test-runner)
-
+https://github.com/yokotakohei/fortran-test-framework

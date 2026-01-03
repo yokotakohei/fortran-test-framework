@@ -51,8 +51,10 @@ module fortest_assertions
     ! Format strings for aligned output.
     !> Format for count output.
     character(len=*), parameter :: fmt_count = "(A,I0)"
-    !> Format for result output with color (4-digit right-aligned).
-    character(len=*), parameter :: fmt_result = "(A,A,I4,A)"
+    !> Format for result output with color.
+    character(len=*), parameter :: fmt_test_result = "(*(A))"
+    !> Format for result summry output with color (4-digit right-aligned).
+    character(len=*), parameter :: fmt_result_summary = "(A,A,I4,A)"
     
     ! Test execution statistics.
     !> The total number of tests.
@@ -331,7 +333,7 @@ contains
         character(len=*), intent(in) :: test_name
 
         passed_count = passed_count + 1
-        print*, color_green, msg_pass, color_reset, trim(test_name)
+        print fmt_test_result, color_green, msg_pass, color_reset, trim(test_name)
     end subroutine report_pass
 
 
@@ -345,8 +347,8 @@ contains
         integer, intent(in) :: actual
 
         failed_count = failed_count + 1
-        print*, color_red, msg_fail, color_reset, trim(test_name)
-        print*, msg_indent, expected, msg_vs, actual
+        print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
+        print '(A,A,I0,A,A,I0)', msg_indent, "expected = ", expected, msg_vs, "actual = ", actual
     end subroutine report_fail
 
 
@@ -360,8 +362,8 @@ contains
         real(real32), intent(in) :: actual
 
         failed_count = failed_count + 1
-        print*, color_red, msg_fail, color_reset, trim(test_name)
-        print*, msg_indent, expected, msg_vs, actual
+        print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
+        print '(A,A,G0,A,A,G0)', msg_indent, "expected = ", expected, msg_vs, "actual = ", actual
     end subroutine report_fail_real
 
 
@@ -375,8 +377,8 @@ contains
         real(real64), intent(in) :: actual
 
         failed_count = failed_count + 1
-        print*, color_red, msg_fail, color_reset, trim(test_name)
-        print*, msg_indent, expected, msg_vs, actual
+        print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
+        print '(A,A,G0,A,A,G0)', msg_indent, "expected = ", expected, msg_vs, "actual = ", actual
     end subroutine report_fail_double
 
 
@@ -386,7 +388,7 @@ contains
         character(len=*), intent(in) :: test_name
 
         failed_count = failed_count + 1
-        print*, color_red, msg_fail, color_reset, trim(test_name)
+        print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
     end subroutine report_fail_logical
 
 
@@ -400,8 +402,8 @@ contains
         character(len=*), intent(in) :: actual
 
         failed_count = failed_count + 1
-        print*, color_red, msg_fail, color_reset, trim(test_name)
-        print*, msg_indent, msg_expected, '"', expected, '", ', msg_got, '"', actual, '"'
+        print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
+        print fmt_test_result, msg_indent, msg_expected, '"', expected, '", ', msg_got, '"', actual, '"'
     end subroutine report_fail_string
 
 
@@ -413,8 +415,8 @@ contains
         character(len=*), intent(in) :: message
 
         failed_count = failed_count + 1
-        print*, color_red, msg_fail, color_reset, trim(test_name)
-        print*, msg_indent, trim(message)
+        print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
+        print fmt_test_result, msg_indent, trim(message)
     end subroutine report_fail_simple
 
 
@@ -423,8 +425,8 @@ contains
         print '(A)', ""
         print '(A)', msg_separation_line
         print fmt_count, msg_total, test_count
-        print fmt_result, color_green, msg_pass, passed_count, color_reset
-        print fmt_result, color_red, msg_fail, failed_count, color_reset
+        print fmt_result_summary, color_green, msg_pass, passed_count, color_reset
+        print fmt_result_summary, color_red, msg_fail, failed_count, color_reset
         print '(A)', msg_separation_line
     end subroutine print_summary
 
