@@ -69,7 +69,7 @@ module fortest_assertions
         module procedure assert_equal_real
         module procedure assert_equal_double
         module procedure assert_equal_logical
-        module procedure assert_equal_string
+        module procedure assert_equal_character
     end interface
     
     interface assert_array_equal
@@ -171,7 +171,7 @@ contains
 
 
     !> Assert equality of string value.
-    subroutine assert_equal_string(actual, expected, test_name)
+    subroutine assert_equal_character(actual, expected, test_name)
         !> Actual value.
         character(len=*), intent(in) :: actual
         !> Expected value.
@@ -184,9 +184,9 @@ contains
         if(actual == expected) then
             call report_pass(test_name)
         else
-            call report_fail_string(test_name, expected, actual)
+            call report_fail_character(test_name, expected, actual)
         end if
-    end subroutine assert_equal_string
+    end subroutine assert_equal_character
 
 
     !> Assert that condition is true.
@@ -393,7 +393,7 @@ contains
 
 
     !> Report string test failure.
-    subroutine report_fail_string(test_name, expected, actual)
+    subroutine report_fail_character(test_name, expected, actual)
         !> Test name.
         character(len=*), intent(in) :: test_name
         !> Expected value.
@@ -404,7 +404,7 @@ contains
         failed_count = failed_count + 1
         print fmt_test_result, color_red, msg_fail, color_reset, trim(test_name)
         print fmt_test_result, msg_indent, msg_expected, '"', expected, '", ', msg_got, '"', actual, '"'
-    end subroutine report_fail_string
+    end subroutine report_fail_character
 
 
     !> Report test failure with simple message.
