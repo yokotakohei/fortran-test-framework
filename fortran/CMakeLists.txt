@@ -18,6 +18,9 @@ target_include_directories(fortest-assertions
         $<INSTALL_INTERFACE:include/fortest>
 )
 
+# Create alias for FetchContent usage (fortest::assertions)
+add_library(fortest::assertions ALIAS fortest-assertions)
+
 # Installation rules
 include(GNUInstallDirs)
 
@@ -47,26 +50,8 @@ install(EXPORT fortest-assertions-targets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fortest-assertions
 )
 
-# Create package config file
-include(CMakePackageConfigHelpers)
-
-configure_package_config_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/fortest-assertions-config.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/fortest-assertions-config.cmake
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fortest-assertions
-)
-
-write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/fortest-assertions-config-version.cmake
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
-
-install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/fortest-assertions-config.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/fortest-assertions-config-version.cmake
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fortest-assertions
-)
+# Note: For FetchContent usage, the alias fortest::assertions is available.
+# For find_package() support after installation, create cmake/fortest-assertions-config.cmake.in
 
 # Create alias for use as a subdirectory
 add_library(fortest::assertions ALIAS fortest-assertions)
