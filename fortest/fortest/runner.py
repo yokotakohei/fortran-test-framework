@@ -154,12 +154,16 @@ class FortranTestRunner:
 
             # 1. Check relative to test file: ../src/, ../../src/, etc.
             current: Path = test_file_abs.parent
-            for _ in range(3):  # Search up to 3 levels
+
+            # Search up to 3 levels
+            for _ in range(3):
                 src_candidate = current / "src"
                 if src_candidate.exists():
                     search_paths.append(src_candidate)
                 current = current.parent
-                if current == current.parent:  # Reached filesystem root
+
+                # Reached filesystem root
+                if current == current.parent:
                     break
 
             # 2. For fortest development: check fortran/src/
@@ -179,7 +183,9 @@ class FortranTestRunner:
                     modules.append(fortest_module)
                     if self.verbose:
                         print(f"Using assertions from: {fortest_module}")
-                    break  # Use first found
+
+                    # Use first found
+                    break
 
         # Find user's module dependencies in nearby directories
         search_dirs: list[Path] = [test_file_abs.parent]
