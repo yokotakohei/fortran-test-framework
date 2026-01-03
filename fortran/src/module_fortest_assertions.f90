@@ -86,6 +86,7 @@ module fortest_assertions
         module procedure assert_array_equal_double
         module procedure assert_array_equal_complex32
         module procedure assert_array_equal_complex64
+        module procedure assert_array_equal_character
     end interface
 
 contains
@@ -616,6 +617,38 @@ contains
         
         call report_pass(test_name)
     end subroutine assert_array_equal_complex64
+
+
+    !> Assert equality of character array.
+    !> Compares exact character match without trimming whitespace.
+    subroutine assert_array_equal_character(actual, expected, test_name)
+        !> Actual array.
+        character(len=*), intent(in) :: actual(:)
+        !> Expected array.
+        character(len=*), intent(in) :: expected(:)
+        !> Test name.
+        character(len=*), intent(in) :: test_name
+        integer :: i
+        character(len=200) :: error_msg
+        
+        test_count = test_count + 1
+        
+        if(size(actual) /= size(expected)) then
+            call report_fail_simple(test_name, msg_err_array_size)
+            return
+        end if
+        
+        do i = 1, size(actual)
+            if(actual(i) /= expected(i)) then
+                write(error_msg, '(A,I0,A,A,A,A,A,A,A)') &
+                    msg_err_array_differ, i, ': "', expected(i), '"', msg_vs, '"', actual(i), '"'
+                call report_fail_simple(test_name, trim(error_msg))
+                return
+            end if
+        end do
+        
+        call report_pass(test_name)
+    end subroutine assert_array_equal_character
 
 
     !> Report test pass.

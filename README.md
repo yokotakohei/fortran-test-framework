@@ -142,23 +142,62 @@ fortest -v
 
 ### Basic Assertions
 
+#### Integer Types
+
+Supports `int8`, `int16`, `int32`, and `int64` from `iso_fortran_env`:
+
 ```fortran
 use fortest_assertions
-use iso_fortran_env, only: real32, real64, int32
+use iso_fortran_env, only: int8, int16, int32, int64
 
-! Integer comparison
-call assert_equal(actual, expected, "test name")
+! int8 comparison
+call assert_equal(actual_i8, expected_i8, "test name")
 
-! Real comparison (with optional tolerance)
-call assert_equal(actual_real, expected_real, "test name", tol=1.0e-6)
+! int16 comparison
+call assert_equal(actual_i16, expected_i16, "test name")
 
-! Double precision comparison
-call assert_equal(actual_dp, expected_dp, "test name", tol=1.0d-12)
+! int32 comparison
+call assert_equal(actual_i32, expected_i32, "test name")
 
+! int64 comparison
+call assert_equal(actual_i64, expected_i64, "test name")
+```
+
+#### Real Types
+
+Supports `real32` and `real64` with optional tolerance:
+
+```fortran
+use iso_fortran_env, only: real32, real64
+
+! real32 comparison (with optional tolerance)
+call assert_equal(actual_r32, expected_r32, "test name", tol=1.0e-6)
+
+! real64 comparison (with optional tolerance)
+call assert_equal(actual_r64, expected_r64, "test name", tol=1.0d-12)
+```
+
+#### Complex Types
+
+Supports `complex(real32)` and `complex(real64)` with optional tolerance:
+
+```fortran
+! complex(real32) comparison
+call assert_equal(actual_c32, expected_c32, "test name", tol=1.0e-6)
+
+! complex(real64) comparison
+call assert_equal(actual_c64, expected_c64, "test name", tol=1.0d-12)
+```
+
+Note: For complex numbers, both real and imaginary parts must satisfy the tolerance.
+
+#### Logical and Character Types
+
+```fortran
 ! Logical comparison
 call assert_equal(actual_bool, expected_bool, "test name")
 
-! Character comparison
+! Character comparison (exact match)
 call assert_equal(actual_str, expected_str, "test name")
 
 ! Logical assertions
@@ -168,15 +207,47 @@ call assert_false(condition, "test name")
 
 ### Array Assertions
 
+#### Integer Arrays
+
 ```fortran
-! Integer array
-call assert_array_equal(actual_arr, expected_arr, "test name")
+! int8 array
+call assert_array_equal(actual_arr_i8, expected_arr_i8, "test name")
 
-! Real array (with optional tolerance)
-call assert_array_equal(actual_arr, expected_arr, "test name", tol=1.0e-6)
+! int16 array
+call assert_array_equal(actual_arr_i16, expected_arr_i16, "test name")
 
-! Double precision array
-call assert_array_equal(actual_arr_dp, expected_arr_dp, "test name", tol=1.0d-12)
+! int32 array
+call assert_array_equal(actual_arr_i32, expected_arr_i32, "test name")
+
+! int64 array
+call assert_array_equal(actual_arr_i64, expected_arr_i64, "test name")
+```
+
+#### Real Arrays
+
+```fortran
+! real32 array (with optional tolerance)
+call assert_array_equal(actual_arr_r32, expected_arr_r32, "test name", tol=1.0e-6)
+
+! real64 array (with optional tolerance)
+call assert_array_equal(actual_arr_r64, expected_arr_r64, "test name", tol=1.0d-12)
+```
+
+#### Complex Arrays
+
+```fortran
+! complex(real32) array (with optional tolerance)
+call assert_array_equal(actual_arr_c32, expected_arr_c32, "test name", tol=1.0e-6)
+
+! complex(real64) array (with optional tolerance)
+call assert_array_equal(actual_arr_c64, expected_arr_c64, "test name", tol=1.0d-12)
+```
+
+#### Character Arrays
+
+```fortran
+! character array (exact match, no trimming)
+call assert_array_equal(actual_arr_str, expected_arr_str, "test name")
 ```
 
 
