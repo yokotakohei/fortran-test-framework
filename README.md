@@ -24,7 +24,19 @@ fortest consists of two components:
 
 ### 1. Install Python Runner
 
+#### From GitHub
+
 ```bash
+pip install git+https://github.com/yokotakohei/fortran-test-framework.git#subdirectory=fortest
+```
+
+#### For Development
+
+Clone the repository and install in editable mode:
+
+```bash
+git clone https://github.com/yokotakohei/fortran-test-framework.git
+cd fortran-test-framework
 pip install -e fortest/
 ```
 
@@ -46,9 +58,6 @@ FetchContent_Declare(
     SOURCE_SUBDIR fortran
 )
 FetchContent_MakeAvailable(fortest-assertions)
-
-# Link to your test executable
-target_link_libraries(your_test PRIVATE fortest::assertions)
 ```
 
 #### Using FPM
@@ -57,7 +66,7 @@ Add to your `fpm.toml`:
 
 ```toml
 [dependencies]
-fortest-assertions = { git = "https://github.com/yokotakohei/fortran-test-framework.git", path = "fortran" }
+fortest-assertions = { git = "https://github.com/yokotakohei/fortran-test-framework.git" }
 ```
 
 
@@ -69,7 +78,7 @@ fortest automatically discovers test files matching these patterns:
 - `test_*.f90`
 - `module_test_*.f90`
 
-Files containing `error_stop` in their name are treated as error-stop tests (see section [Testing Error Stops](#testing-error-stops)).
+Test subroutines containing `error_stop` in their name are treated as error-stop tests (see section [Testing Error Stops](#testing-error-stops)).
 
 ### 1. Write your Fortran code
 
@@ -107,7 +116,7 @@ contains
         call assert_equal(result, 5_int32, "2 + 3 should equal 5")
     end subroutine test_addition
 
-end program test_sample_module
+end module test_sample_module
 ```
 
 ### 3. Run your tests
@@ -173,24 +182,31 @@ call assert_array_equal(actual_arr_dp, expected_arr_dp, "test name", tol=1.0d-12
 
 ## Testing Error Stops
 
-fortest can automatically detect when a function correctly triggers `error stop`:
+fortest can automatically detect when a test subroutine correctly triggers `error stop`.
+
+Name your test subroutine with `error_stop` in the name:
 
 ```fortran
-! test_error_stop_example.f90
-program test_error_stop_example
+! test_module_sample.f90
+module test_sample_module
     use my_module
     implicit none
 
-    ! This will trigger error stop, which is expected
-    call divide_by_zero(0.0)
-    
-end program test_error_stop_example
+contains
+
+    subroutine test_error_stop_divide_by_zero()
+        ! This will trigger error stop, which is expected
+        call divide_by_zero(0.0)
+    end subroutine test_error_stop_divide_by_zero
+
+end module test_sample_module
 ```
 
-Name your test file with `error_stop` in the filename, and fortest will:
-1. Detect that the test caused an error stop
-2. Mark the test as **PASSED** (because error stop was expected)
-3. Continue running other tests
+When a test subroutine name contains `error_stop`, fortest will:
+1. Run it in isolation
+2. Detect that the test caused an error stop
+3. Mark the test as **PASSED** (because error stop was expected)
+4. Continue running other tests
 
 
 ## Examples
@@ -201,30 +217,24 @@ See the `examples/` directory for complete working examples with both CMake and 
 
 ```bash
 cd examples
-mkdir build && cd build
-cmake ..
-make
-ctest
-```
-
-Or run with fortest:
-
-```bash
-fortest ../test/
+cmake -S . -B build
+cmake --build build
+fortest test/
 ```
 
 ### FPM Example
 
 ```bash
 cd examples
-fpm test
-```
-
-Or run with fortest:
-
-```bash
+fpm build
 fortest test/
 ```
+
+Note: After building with FPM, `fortest` automatically:
+- Discovers test files (`test_*.f90`)
+- Generates test runners
+- Compiles tests using build artifacts from `build/`
+- Executes all tests
 
 ## Command Line Options
 
@@ -248,6 +258,7 @@ Options:
 Running Fortran tests...
 
 Testing: examples/test/test_module_sample.f90
+------------------------------------------------------------
 [PASS] add_integers(2, 3) should return 5
 [PASS] multiply_real(0.0, 100.0) should return 0.0
 [FAIL] multiply_real(0.0, 100.0) should return 0.0
@@ -273,6 +284,7 @@ error_stop tests: 1
 ==================================================
 
 
+------------------------------------------------------------
 All tests completed.
 ==================================================
 Total tests: 7

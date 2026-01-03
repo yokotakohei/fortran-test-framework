@@ -7,6 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from fortest import __version__ as FORTEST_VERSION
 from fortest.exit_status import ExitStatus
 from fortest.test_result import Colors
 from fortest.runner import FortranTestRunner
@@ -41,6 +42,12 @@ def get_arguments() -> argparse.Namespace:
         "--build-dir",
         type=Path,
         help="Build directory (default: temporary directory)",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"fortest {FORTEST_VERSION}",
+        help="Show program's version number and exit",
     )
     return parser.parse_args()
 

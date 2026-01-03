@@ -5,7 +5,7 @@ author = "Kohei Yokota"
 copyright = "Copyright 2026 Kohei Yokota"
 
 [dependencies]
-fortest-assertions = { git = "https://github.com/yokotakohei/fortran-test-framework.git", path = "fortran" }
+fortest-assertions = { git = "https://github.com/yokotakohei/fortran-test-framework.git" }
 
 [build]
 auto-executables = false
@@ -14,8 +14,3 @@ auto-examples = false
 
 [library]
 source-dir = "src"
-
-[[test]]
-name = "test_module_sample"
-source-dir = "test"
-main = "run_tests.f90"
