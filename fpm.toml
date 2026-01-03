@@ -14,7 +14,7 @@ auto-tests = false
 auto-examples = false
 
 [library]
-source-dir = "src"
+source-dir = "fortran/src"
 
 [install]
 library = true
