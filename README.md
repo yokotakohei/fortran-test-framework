@@ -69,7 +69,7 @@ fortest automatically discovers test files matching these patterns:
 - `test_*.f90`
 - `module_test_*.f90`
 
-Files containing `error_stop` in their name are treated as error-stop tests (see section [Testing Error Stops](#Testing Error Stops)).
+Files containing `error_stop` in their name are treated as error-stop tests (see section [Testing Error Stops](#testing-error-stops)).
 
 ### 1. Write your Fortran code
 
