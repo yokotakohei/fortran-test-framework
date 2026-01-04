@@ -8,27 +8,16 @@ import glob
 import re
 import subprocess
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
+from fortest.utilities import deduplicate
 from fortest.test_result import Colors, MessageTag, TestResult
 from fortest.exit_status import ExitStatus
-
-
-@dataclass(frozen=True)
-class BuildSystemInfo:
-    """
-    Information about detected build system.
-
-    Attributes
-    ----------
-    build_type : str
-        Type of build system ('cmake', 'fpm', or 'make')
-    project_dir : Path
-        Root directory of the project
-    """
-    build_type: str
-    project_dir: Path
+from fortest.build_system_detector import BuildSystemInfo, BuildSystemDetector
+from fortest.module_dependency_resolver import ModuleDependencyResolver
+from fortest.test_code_generator import TestCodeGenerator
+from fortest.test_result_formatter import TestResultFormatter
+from fortest.project_builder import ProjectBuilder
 
 
 class FortranTestRunner:
@@ -94,6 +83,13 @@ class FortranTestRunner:
         self.passed_tests: int = 0
         self.failed_tests: int = 0
         self.error_stop_tests: int = 0
+        
+        # Initialize helper classes
+        self.detector: BuildSystemDetector = BuildSystemDetector(verbose)
+        self.resolver: ModuleDependencyResolver = ModuleDependencyResolver(verbose)
+        self.generator: TestCodeGenerator = TestCodeGenerator(verbose)
+        self.formatter: TestResultFormatter = TestResultFormatter(verbose)
+        self.builder: ProjectBuilder = ProjectBuilder(compiler, verbose, self.detector, self.resolver, self.generator)
 
 
     def find_test_files(self, pattern: str) -> list[Path]:
@@ -124,13 +120,7 @@ class FortranTestRunner:
                         found.append(file.resolve())
 
             # Deduplicate while preserving order
-            seen: set[Path] = set()
-            unique: list[Path] = []
-            for p in found:
-                if p not in seen:
-                    seen.add(p)
-                    unique.append(p)
-            return unique
+            return deduplicate(found)
 
         # Otherwise search for pattern and normalize/resolve results
         found = []
@@ -142,14 +132,7 @@ class FortranTestRunner:
                 found.append(Path(file).resolve())
 
         # Deduplicate while preserving order
-        seen = set()
-        unique = []
-        for p in found:
-            if p not in seen:
-                seen.add(p)
-                unique.append(p)
-
-        return unique
+        return deduplicate(found)
 
 
     def _find_build_directories(self, test_file: Path) -> list[Path]:
@@ -340,27 +323,7 @@ class FortranTestRunner:
         list[Path]
             List of module file paths that the test depends on (direct dependencies only)
         """
-        modules: list[Path] = []
-        test_file_abs: Path = test_file.resolve()
-
-        # Extract module names used in the test file
-        used_modules: list[str] = self.extract_use_statements(test_file_abs)
-
-        # Build search directories
-        search_dirs: list[Path] = self._build_search_directories(test_file_abs)
-
-        # Find fortest_assertions if needed
-        fortest_assertions: str = FortranTestRunner.ASSERTION_MODULE
-        if include_assertions and fortest_assertions in used_modules:
-            assertion_module = self._find_assertion_module(search_dirs)
-            if assertion_module:
-                modules.append(assertion_module)
-
-        # Find user modules
-        user_modules = self._find_user_modules(used_modules, search_dirs, test_file_abs)
-        modules.extend(user_modules)
-
-        return modules
+        return self.resolver.find_module_files(test_file, include_assertions)
 
 
     def extract_module_name(self, file_path: Path) -> str | None:
@@ -377,27 +340,7 @@ class FortranTestRunner:
         str | None
             Module name in lowercase, or None if not found
         """
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content: str = f.read()
-        except (UnicodeDecodeError, OSError):
-            # Skip files with encoding issues or read errors
-            if self.verbose:
-                print(f"Warning: Could not read {file_path} (encoding issue)")
-            return None
-
-        # Remove comments
-        content = re.sub(r"!.*$", "", content, flags=re.MULTILINE)
-
-        # Find module name
-        match: re.Match[str] | None = re.search(
-            r"\bmodule\s+(\w+)",
-            content,
-            re.IGNORECASE,
-        )
-        if match:
-            return match.group(1).lower()
-        return None
+        return self.resolver.extract_module_name(file_path)
 
 
     def extract_use_statements(self, file_path: Path) -> list[str]:
@@ -462,24 +405,7 @@ class FortranTestRunner:
         list[Path]
             List of found .f90 files
         """
-        files: list[Path] = []
-
-        def scan_dir(current_dir: Path, depth: int) -> None:
-            if depth > max_depth or not current_dir.is_dir():
-                return
-
-            try:
-                for item in current_dir.iterdir():
-                    if item.is_file() and item.suffix == ".f90":
-                        files.append(item)
-                    elif item.is_dir() and not item.name.startswith('.'):
-                        scan_dir(item, depth + 1)
-            except PermissionError:
-                # Skip directories we can't read
-                pass
-
-        scan_dir(directory, 0)
-        return files
+        return self.resolver.find_fortran_files_recursive(directory, max_depth)
 
 
     def find_module_file_by_name(self, module_name: str, search_dirs: list[Path]) -> Path | None:
@@ -488,26 +414,20 @@ class FortranTestRunner:
 
         First searches the provided search_dirs, then falls back to a broader
         recursive search from the current working directory if not found.
+        
+        Parameters
+        ----------
+        module_name : str
+            Name of the module to find
+        search_dirs : list[Path]
+            Directories to search in
+
+        Returns
+        -------
+        Path | None
+            Path to the module file, or None if not found
         """
-        for search_dir in search_dirs:
-            # Search recursively in this directory
-            for f90_file in self.find_fortran_files_recursive(search_dir):
-                file_module = self.extract_module_name(f90_file)
-                if file_module == module_name.lower():
-                    return f90_file
-
-        # Fallback: search the current working directory tree more broadly
-        cwd = Path.cwd()
-        if self.verbose:
-            print(f"Module {module_name} not found in search_dirs, searching {cwd} recursively as fallback")
-        for f90_file in self.find_fortran_files_recursive(cwd, max_depth=6):
-            file_module = self.extract_module_name(f90_file)
-            if file_module == module_name.lower():
-                if self.verbose:
-                    print(f"Found {module_name} at {f90_file} via fallback search")
-                return f90_file
-
-        return None
+        return self.resolver.find_module_file_by_name(module_name, search_dirs)
 
 
     def extract_test_subroutines(self, test_file: Path) -> list[str]:
@@ -526,29 +446,7 @@ class FortranTestRunner:
         list[str]
             List of test subroutine names in lowercase (unique, order-preserving)
         """
-        with open(test_file, "r") as f:
-            content: str = f.read()
-
-        # Remove comments
-        content = re.sub(r"!.*$", "", content, flags=re.MULTILINE)
-
-        # Match only lines that start a subroutine (avoid "end subroutine ...")
-        pattern: str = r"(?mi)^\s*subroutine\s+(test_\w+)\b"
-        matches: list[str] = re.findall(pattern, content)
-
-        # Normalize to lowercase and remove duplicates preserving order
-        seen: set[str] = set()
-        test_subroutines: list[str] = []
-        for m in matches:
-            name: str = m.lower()
-            if name not in seen:
-                seen.add(name)
-                test_subroutines.append(name)
-
-        if self.verbose:
-            print(f"Found test subroutines: {test_subroutines}")
-
-        return test_subroutines
+        return self.generator.extract_test_subroutines(test_file)
 
 
     def separate_error_stop_tests(self,
@@ -567,16 +465,7 @@ class FortranTestRunner:
         tuple[list[str], list[str]]
             Tuple of (normal_tests, error_stop_tests)
         """
-        normal_tests: list[str] = []
-        error_stop_tests: list[str] = []
-
-        for test_name in test_subroutines:
-            if "error_stop" in test_name:
-                error_stop_tests.append(test_name)
-            else:
-                normal_tests.append(test_name)
-
-        return normal_tests, error_stop_tests
+        return self.generator.separate_error_stop_tests(test_subroutines)
 
 
     def generate_test_program(self,
@@ -604,27 +493,7 @@ class FortranTestRunner:
         Path
             Path to the generated program file
         """
-        fortest_assertions: str = FortranTestRunner.ASSERTION_MODULE
-        program_content: str = f"program run_{test_file.stem}\n"
-        program_content += f"    use {fortest_assertions}\n"
-        program_content += f"    use {test_module_name}\n"
-        program_content += "    implicit none\n"
-
-        # Call all test subroutines
-        for test_sub in test_subroutines:
-            program_content += f"    call {test_sub}()\n"
-
-        program_content += "    call print_summary()\n"
-        program_content += f"end program run_{test_file.stem}\n"
-
-        generated_file: Path = output_dir / f"gen_runner_{test_file.name}"
-        with open(generated_file, "w") as f:
-            f.write(program_content)
-
-        if self.verbose:
-            print(f"Generated program:\n{program_content}")
-
-        return generated_file
+        return self.generator.generate_test_program(test_file, test_module_name, test_subroutines, output_dir)
 
 
     def generate_error_stop_test_program(self,
@@ -649,20 +518,7 @@ class FortranTestRunner:
         Path
             Path to the generated program file
         """
-        program_content: str = f"program run_{test_subroutine}\n"
-        program_content += f"    use {test_module_name}\n"
-        program_content += "    implicit none\n"
-        program_content += f"    call {test_subroutine}()\n"
-        program_content += f"end program run_{test_subroutine}\n"
-
-        generated_file: Path = output_dir / f"gen_{test_subroutine}.f90"
-        with open(generated_file, "w") as f:
-            f.write(program_content)
-
-        if self.verbose:
-            print(f"Generated error_stop test program:\n{program_content}")
-
-        return generated_file
+        return self.generator.generate_error_stop_test_program(test_module_name, test_subroutine, output_dir)
 
 
     def detect_build_system(self, test_file: Path) -> BuildSystemInfo | None:
@@ -682,25 +538,7 @@ class FortranTestRunner:
         BuildSystemInfo | None
             Build system information if detected, None otherwise
         """
-        # Start from test file directory and search upwards
-        current: Path = test_file.resolve().parent
-
-        while current != current.parent:  # Stop at filesystem root
-            # Check for fpm.toml (highest priority)
-            if (current / "fpm.toml").exists():
-                return BuildSystemInfo("fpm", current)
-
-            # Check for CMakeLists.txt
-            if (current / "CMakeLists.txt").exists():
-                return BuildSystemInfo("cmake", current)
-
-            # Check for Makefile
-            if (current / "Makefile").exists():
-                return BuildSystemInfo("make", current)
-
-            current = current.parent
-
-        return None
+        return self.detector.detect(test_file)
 
 
     def _find_cmake_executable(self, build_dir: Path, test_file: Path) -> Path | None:
@@ -908,34 +746,7 @@ class FortranTestRunner:
         Path | None
             Path to the test executable if found, None otherwise
         """
-        build_type: str = build_info.build_type
-        project_dir: Path = build_info.project_dir
-
-        if self.verbose:
-            print(f"Detected {build_type} build system in {project_dir}")
-
-        try:
-            if build_type == "cmake":
-                return self._build_with_cmake(project_dir, test_file)
-            elif build_type == "fpm":
-                return self._build_with_fpm(project_dir, test_file)
-            elif build_type == "make":
-                return self._build_with_make(project_dir, test_file)
-
-        except subprocess.CalledProcessError as e:
-            print(
-                f"{Colors.RED.value}Build failed with {build_type}"
-                f"{Colors.RESET.value}"
-            )
-            if self.verbose:
-                print(e.stderr)
-            return None
-        except Exception as e:
-            if self.verbose:
-                print(f"Error during build: {e}")
-            return None
-
-        return None
+        return self.builder.build_with_system(build_info, test_file)
 
 
     def _is_standalone_program(self, test_file: Path) -> bool:
@@ -1103,22 +914,7 @@ class FortranTestRunner:
         Path | None
             Path to the compiled executable, or None if compilation failed
         """
-        # Try to detect and use build system first
-        build_info: BuildSystemInfo | None = self.detect_build_system(test_file)
-        if build_info is not None:
-            executable_built: Path | None = self.build_with_system(build_info, test_file)
-            if executable_built is not None:
-                return executable_built
-
-            # If build system detected but failed, fall back to direct compilation
-            if self.verbose:
-                print("Falling back to direct compilation with gfortran")
-
-        # Check if this is a standalone program or module-based test
-        if self._is_standalone_program(test_file):
-            return self._compile_standalone_program(test_file, output_dir)
-        else:
-            return self._compile_module_test(test_file, output_dir)
+        return self.builder.compile_test(test_file, output_dir)
 
 
     def run_test_executable(self, executable: Path) -> tuple[bool, str, int]:
@@ -1165,26 +961,7 @@ class FortranTestRunner:
         list[TestResult]
             List of parsed test results
         """
-        results: list[TestResult] = []
-        lines: list[str] = output.strip().split("\n")
-
-        for line in lines:
-            # Remove ANSI color codes first
-            clean: str = re.sub(r"\x1b\[[0-9;]*m", "", line).rstrip()
-
-            # Skip Fortran summary lines like "[PASS]   9" or "[FAIL]   0"
-            if re.search(rf"{re.escape(MessageTag.PASS.value)}\s*\d+\s*$", clean) \
-            or re.search(rf"{re.escape(MessageTag.FAIL.value)}\s*\d+\s*$", clean):
-                continue
-
-            if MessageTag.PASS.value in clean:
-                test_name: str = clean.split(MessageTag.PASS.value, 1)[1].strip()
-                results.append(TestResult(test_name, True))
-            elif MessageTag.FAIL.value in clean:
-                test_name: str = clean.split(MessageTag.FAIL.value, 1)[1].strip()
-                results.append(TestResult(test_name, False))
-
-        return results
+        return self.formatter.parse_test_output(output)
 
 
     def check_error_stop_test(self, test_file: Path, output_dir: Path) -> list[TestResult]:
@@ -1342,17 +1119,7 @@ class FortranTestRunner:
         normal_results : list[TestResult]
             List of normal test results
         """
-        separator: str = "=" * 50
-        normal_passed: int = sum(1 for r in normal_results if r.passed)
-        normal_failed: int = len(normal_results) - normal_passed
-
-        print()
-        print(separator)
-        print(f"Normal tests: {len(normal_results)}")
-        print(f"{Colors.GREEN.value}{MessageTag.PASS.value}{normal_passed:>4}{Colors.RESET.value}")
-        print(f"{Colors.RED.value}{MessageTag.FAIL.value}{normal_failed:>4}{Colors.RESET.value}")
-        print(separator)
-        print()
+        self.formatter.print_normal_test_summary(normal_results)
 
 
     def _compile_module_dependencies(self,
@@ -1378,22 +1145,7 @@ class FortranTestRunner:
             Tuple of (compiled_objects, error_message)
             Returns ([], None) on success, ([], error_msg) on failure
         """
-        build_dirs = self._find_build_directories(test_file)
-        compiled_objects: list[Path] = []
-
-        for module_file in module_files:
-            compile_result = self._compile_single_module(
-                module_file,
-                build_dirs,
-                output_dir,
-            )
-
-            if compile_result is None:
-                return [], f"Failed to compile dependency {module_file.name}"
-
-            compiled_objects.append(compile_result)
-
-        return compiled_objects, None
+        return self.builder.compile_module_dependencies(module_files, test_file, output_dir)
 
 
     def _compile_single_module(self,
@@ -1478,34 +1230,7 @@ class FortranTestRunner:
         str | None
             Error message if compilation failed, None on success
         """
-        build_dirs = self._find_build_directories(test_file)
-        compile_cmd = [self.compiler, "-o", str(executable_path)]
-
-        for build_dir in build_dirs:
-            compile_cmd.extend(["-I", str(build_dir)])
-
-        compile_cmd.extend(["-I", str(output_dir), "-J", str(output_dir)])
-        compile_cmd.extend([str(obj) for obj in compiled_objects])
-        compile_cmd.append(str(test_file))
-        compile_cmd.append(str(program_file))
-
-        if self.verbose:
-            print(f"Compiling test: {' '.join(compile_cmd)}")
-
-        try:
-            subprocess.run(
-                compile_cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            return None
-
-        except subprocess.CalledProcessError as e:
-            if e.stderr:
-                print(f"{Colors.RED.value}Compilation error:{Colors.RESET.value}")
-                print(e.stderr)
-            return f"Compilation failed: {e.stderr}"
+        return self.builder.compile_test_executable(test_file, program_file, executable_path, compiled_objects, output_dir)
 
 
     def _run_single_normal_test(self,
@@ -1664,22 +1389,7 @@ class FortranTestRunner:
         Path
             Path to the generated program file
         """
-        fortest_assertions: str = FortranTestRunner.ASSERTION_MODULE
-        program_content: str = f"program run_{test_subroutine}\n"
-        program_content += f"    use {fortest_assertions}\n"
-        program_content += f"    use {test_module_name}\n"
-        program_content += "    implicit none\n"
-        program_content += f"    call {test_subroutine}()\n"
-        program_content += f"end program run_{test_subroutine}\n"
-
-        generated_file: Path = output_dir / f"gen_{test_subroutine}.f90"
-        with open(generated_file, "w") as f:
-            f.write(program_content)
-
-        if self.verbose:
-            print(f"Generated program for {test_subroutine}:\n{program_content}")
-
-        return generated_file
+        return self.generator.generate_single_test_program(test_module_name, test_subroutine, output_dir)
 
 
     def _print_error_stop_summary(self, error_stop_results: list[TestResult]) -> None:
@@ -1691,33 +1401,7 @@ class FortranTestRunner:
         error_stop_results : list[TestResult]
             List of error_stop test results
         """
-        # Count pass/fail for error_stop tests
-        error_stop_passed: int = sum(1 for r in error_stop_results if r.passed)
-        error_stop_failed: int = len(error_stop_results) - error_stop_passed
-
-        # Print individual results
-        for result in error_stop_results:
-            if result.passed:
-                print(
-                    f"{Colors.GREEN.value}{MessageTag.PASS.value}{Colors.RESET.value} "
-                    f"{result.name}"
-                )
-            else:
-                print(
-                    f"{Colors.RED.value}{MessageTag.FAIL.value}{Colors.RESET.value} "
-                    f"{result.name}"
-                )
-                if result.message:
-                    print(f"       {result.message}")
-
-        separator: str = "=" * 50
-        print()
-        print(separator)
-        print(f"error_stop tests: {len(error_stop_results)}")
-        print(f"{Colors.GREEN.value}{MessageTag.PASS.value}{error_stop_passed:>4}{Colors.RESET.value}")
-        print(f"{Colors.RED.value}{MessageTag.FAIL.value}{error_stop_failed:>4}{Colors.RESET.value}")
-        print(separator)
-        print()
+        self.formatter.print_error_stop_summary(error_stop_results)
 
 
     def _handle_normal_test(self, test_file: Path, output_dir: Path) -> list[TestResult]:
@@ -2397,40 +2081,7 @@ class FortranTestRunner:
         str
             Filtered output containing only test results
         """
-        # Remove common FPM build/progress messages
-        filtered_lines = []
-        for line in output.split('\n'):
-            # Keep lines with test results
-            if '[PASS]' in line or '[FAIL]' in line:
-                filtered_lines.append(line)
-                continue
-            # Keep lines that look like assertion details (indented with whitespace)
-            if line.startswith('       '):
-                filtered_lines.append(line)
-                continue
-            # Skip FPM build information lines and common FPM messages
-            if any(skip in line for skip in [
-                'fpm build complete',
-                'fpm test complete',
-                '+ mkdir',
-                '+ gfortran',
-                '+ ar',
-                'build/gfortran',
-                '[100%]',
-                '[  0%]',
-                '[ 50%]',
-                'building',
-                '<INFO>',
-                'STOP 0',
-                ' done.',
-            ]):
-                continue
-            # Skip empty lines
-            if not line.strip():
-                continue
-            # Keep other lines (might be test output)
-            filtered_lines.append(line)
-        return '\n'.join(filtered_lines)
+        return self.formatter.filter_fpm_output(output)
 
 
     def _run_single_test_with_fpm(self,
@@ -2949,20 +2600,8 @@ class FortranTestRunner:
         int
             Exit code (0 if all tests passed, 1 otherwise)
         """
-        separator: str = "-" * 60
-        separator_table: str = "=" * 50
-
-        print(separator)
-        print("All tests completed.")
-        print(separator_table)
-        print(f"Total tests: {self.total_tests}")
-        print(f"{Colors.GREEN.value}{MessageTag.PASS.value}{self.passed_tests:>4}{Colors.RESET.value}")
-        print(f"{Colors.RED.value}{MessageTag.FAIL.value}{self.failed_tests:>4}{Colors.RESET.value}")
-        print(separator_table)
-
-        if self.failed_tests == 0 and self.total_tests > 0:
-            print(f"\n{Colors.GREEN.value}{Colors.BOLD.value}All tests passed! ✓{Colors.RESET.value}")
-            return ExitStatus.SUCCESS.value
-        else:
-            print(f"\n{Colors.RED.value}{Colors.BOLD.value}Some tests failed ✗{Colors.RESET.value}")
-            return ExitStatus.ERROR.value
+        return self.formatter.print_final_summary(
+            self.total_tests,
+            self.passed_tests,
+            self.failed_tests
+        )
