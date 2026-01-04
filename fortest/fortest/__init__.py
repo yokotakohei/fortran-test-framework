@@ -6,3 +6,7 @@ automatic test harness generation.
 """
 
 __version__ = "0.1.0"
+
+from fortest.fortran_test_runner import FortranTestRunner
+
+__all__ = ["FortranTestRunner"]

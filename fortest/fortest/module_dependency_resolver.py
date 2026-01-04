@@ -47,7 +47,7 @@ class ModuleDependencyResolver:
         verbose : bool, optional
             Enable verbose output, by default False
         """
-        self.verbose: bool = verbose
+        self._verbose: bool = verbose
 
 
     def find_module_files(
@@ -114,7 +114,7 @@ class ModuleDependencyResolver:
                 content: str = f.read()
         except (UnicodeDecodeError, OSError):
             # Skip files with encoding issues or read errors
-            if self.verbose:
+            if self._verbose:
                 print(f"Warning: Could not read {file_path} (encoding issue)")
             return []
 
@@ -160,7 +160,7 @@ class ModuleDependencyResolver:
                 content: str = f.read()
         except (UnicodeDecodeError, OSError):
             # Skip files with encoding issues or read errors
-            if self.verbose:
+            if self._verbose:
                 print(f"Warning: Could not read {file_path} (encoding issue)")
             return None
 
@@ -242,12 +242,12 @@ class ModuleDependencyResolver:
 
         # Fallback: search the current working directory tree more broadly
         cwd = Path.cwd()
-        if self.verbose:
+        if self._verbose:
             print(f"Module {module_name} not found in search_dirs, searching {cwd} recursively as fallback")
         for f90_file in self.find_fortran_files_recursive(cwd, max_depth=6):
             file_module = self.extract_module_name(f90_file)
             if file_module == module_name.lower():
-                if self.verbose:
+                if self._verbose:
                     print(f"Found {module_name} at {f90_file} via fallback search")
                 return f90_file
 
@@ -362,7 +362,7 @@ class ModuleDependencyResolver:
                 if f90_file.name != "module_fortest_assertions.f90":
                     continue
 
-                if self.verbose:
+                if self._verbose:
                     print(f"Using assertions from: {f90_file}")
 
                 return f90_file
@@ -370,7 +370,7 @@ class ModuleDependencyResolver:
         # Fallback: use bundled module located next to runner.py
         bundled = Path(__file__).resolve().parent / "module_fortest_assertions.f90"
         if bundled.exists():
-            if self.verbose:
+            if self._verbose:
                 print(f"Using bundled assertions from: {bundled}")
             return bundled
 
@@ -421,7 +421,7 @@ class ModuleDependencyResolver:
                 continue
 
             modules.append(module_file)
-            if self.verbose:
+            if self._verbose:
                 print(f"Found dependency: {module_file} (provides {module_name})")
 
         return modules

@@ -18,9 +18,7 @@ class ProjectBuilder:
     Supports building with build systems (CMake, FPM, Make) and
     falls back to direct compilation with gfortran when needed.
     """
-
-    def __init__(
-        self,
+    def __init__(self,
         compiler: str = "gfortran",
         verbose: bool = False,
         detector: BuildSystemDetector | None = None,
@@ -43,11 +41,11 @@ class ProjectBuilder:
         generator : TestCodeGenerator | None, optional
             Test code generator instance, by default None (creates new one)
         """
-        self.compiler: str = compiler
-        self.verbose: bool = verbose
-        self.detector: BuildSystemDetector = detector or BuildSystemDetector(verbose)
-        self.resolver: ModuleDependencyResolver = resolver or ModuleDependencyResolver(verbose)
-        self.generator: TestCodeGenerator = generator or TestCodeGenerator(verbose)
+        self._compiler: str = compiler
+        self._verbose: bool = verbose
+        self._detector: BuildSystemDetector = detector or BuildSystemDetector(verbose)
+        self._resolver: ModuleDependencyResolver = resolver or ModuleDependencyResolver(verbose)
+        self._generator: TestCodeGenerator = generator or TestCodeGenerator(verbose)
 
     def build_with_system(self, build_info: BuildSystemInfo, test_file: Path) -> Path | None:
         """
@@ -68,7 +66,7 @@ class ProjectBuilder:
         build_type: str = build_info.build_type
         project_dir: Path = build_info.project_dir
 
-        if self.verbose:
+        if self._verbose:
             print(f"Building with {build_type} in {project_dir}")
 
         try:
@@ -84,11 +82,11 @@ class ProjectBuilder:
                 f"{Colors.RED.value}Build failed with {build_type}"
                 f"{Colors.RESET.value}"
             )
-            if self.verbose:
+            if self._verbose:
                 print(e.stderr)
             return None
         except Exception as e:
-            if self.verbose:
+            if self._verbose:
                 print(f"Error during build: {e}")
             return None
 
@@ -114,14 +112,14 @@ class ProjectBuilder:
             Path to the compiled executable, or None if compilation failed
         """
         # Try to detect and use build system first
-        build_info: BuildSystemInfo | None = self.detector.detect(test_file)
+        build_info: BuildSystemInfo | None = self._detector.detect(test_file)
         if build_info is not None:
             executable_built: Path | None = self.build_with_system(build_info, test_file)
             if executable_built is not None:
                 return executable_built
 
             # If build system detected but failed, fall back to direct compilation
-            if self.verbose:
+            if self._verbose:
                 print("Falling back to direct compilation with gfortran")
 
         # Check if this is a standalone program or module-based test
@@ -167,7 +165,7 @@ class ProjectBuilder:
             check=True,
         )
 
-        return self.detector.find_cmake_executable(build_dir, test_file)
+        return self._detector.find_cmake_executable(build_dir, test_file)
 
     def _build_with_fpm(self, project_dir: Path, test_file: Path) -> Path | None:
         """
@@ -193,7 +191,7 @@ class ProjectBuilder:
             check=True,
         )
 
-        return self.detector.find_fpm_executable(project_dir, test_file)
+        return self._detector.find_fpm_executable(project_dir, test_file)
 
     def _build_with_make(self, project_dir: Path, test_file: Path) -> Path | None:
         """
@@ -219,7 +217,7 @@ class ProjectBuilder:
             check=True,
         )
 
-        return self.detector.find_make_executable(project_dir, test_file)
+        return self._detector.find_make_executable(project_dir, test_file)
 
     def _is_standalone_program(self, test_file: Path) -> bool:
         """
@@ -263,14 +261,14 @@ class ProjectBuilder:
         """
         executable: Path = output_dir / test_file.stem
         compile_cmd: list[str] = [
-            self.compiler,
+            self._compiler,
             "-J", str(output_dir),
             "-o",
             str(executable),
             str(test_file),
         ]
 
-        if self.verbose:
+        if self._verbose:
             print(f"Compiling standalone program: {' '.join(compile_cmd)}")
 
         try:
@@ -306,7 +304,7 @@ class ProjectBuilder:
             Path to the compiled executable, or None if compilation failed
         """
         # Extract test information
-        test_module_name: str | None = self.resolver.extract_module_name(test_file)
+        test_module_name: str | None = self._resolver.extract_module_name(test_file)
         if not test_module_name:
             print(
                 f"{Colors.YELLOW.value}Warning: Could not find module in "
@@ -314,7 +312,7 @@ class ProjectBuilder:
             )
             return None
 
-        test_subroutines: list[str] = self.generator.extract_test_subroutines(test_file)
+        test_subroutines: list[str] = self._generator.extract_test_subroutines(test_file)
         if not test_subroutines:
             print(
                 f"{Colors.YELLOW.value}Warning: No test subroutines found in "
@@ -323,10 +321,10 @@ class ProjectBuilder:
             return None
 
         # Find module dependencies (including assertions for standalone mode)
-        module_files: list[Path] = self.resolver.find_module_files(test_file, include_assertions=True)
+        module_files: list[Path] = self._resolver.find_module_files(test_file, include_assertions=True)
 
         # Generate main program
-        main_program: Path = self.generator.generate_test_program(
+        main_program: Path = self._generator.generate_test_program(
             test_file,
             test_module_name,
             test_subroutines,
@@ -336,7 +334,7 @@ class ProjectBuilder:
         # Compile all files
         executable = output_dir / test_file.stem
         compile_cmd = [
-            self.compiler,
+            self._compiler,
             "-J", str(output_dir),
             "-o", str(executable),
         ]
@@ -346,7 +344,7 @@ class ProjectBuilder:
         compile_cmd.append(str(test_file))
         compile_cmd.append(str(main_program))
 
-        if self.verbose:
+        if self._verbose:
             print(f"Compiling: {' '.join(compile_cmd)}")
 
         try:
@@ -389,7 +387,7 @@ class ProjectBuilder:
             Tuple of (compiled_objects, error_message)
             Returns ([], None) on success, ([], error_msg) on failure
         """
-        build_dirs = self.resolver.find_build_directories(test_file)
+        build_dirs = self._resolver.find_build_directories(test_file)
         compiled_objects: list[Path] = []
 
         for module_file in module_files:
@@ -429,7 +427,7 @@ class ProjectBuilder:
         Path | None
             Path to compiled object file, or None on failure
         """
-        compile_mod_cmd = [self.compiler, "-c", str(module_file)]
+        compile_mod_cmd = [self._compiler, "-c", str(module_file)]
 
         for build_dir in build_dirs:
             compile_mod_cmd.extend(["-I", str(build_dir)])
@@ -440,7 +438,7 @@ class ProjectBuilder:
             "-o", str(output_obj),
         ])
 
-        if self.verbose:
+        if self._verbose:
             print(f"Compiling module dependency: {' '.join(compile_mod_cmd)}")
 
         try:
@@ -489,8 +487,8 @@ class ProjectBuilder:
         str | None
             Error message if compilation failed, None on success
         """
-        build_dirs = self.resolver.find_build_directories(test_file)
-        compile_cmd = [self.compiler, "-o", str(executable_path)]
+        build_dirs = self._resolver.find_build_directories(test_file)
+        compile_cmd = [self._compiler, "-o", str(executable_path)]
 
         for build_dir in build_dirs:
             compile_cmd.extend(["-I", str(build_dir)])
@@ -500,7 +498,7 @@ class ProjectBuilder:
         compile_cmd.append(str(test_file))
         compile_cmd.append(str(program_file))
 
-        if self.verbose:
+        if self._verbose:
             print(f"Compiling test: {' '.join(compile_cmd)}")
 
         try:

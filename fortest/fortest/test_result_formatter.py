@@ -23,7 +23,7 @@ class TestResultFormatter:
         verbose : bool, optional
             Enable verbose output, by default False
         """
-        self.verbose: bool = verbose
+        self._verbose: bool = verbose
 
 
     def parse_test_output(self, output: str) -> list[TestResult]:

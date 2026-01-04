@@ -39,7 +39,7 @@ class BuildSystemDetector:
         verbose : bool, optional
             Enable verbose output, by default False
         """
-        self.verbose: bool = verbose
+        self._verbose: bool = verbose
 
 
     def detect(self, test_file: Path) -> BuildSystemInfo | None:
@@ -65,25 +65,25 @@ class BuildSystemDetector:
         while current != current.parent:  # Stop at filesystem root
             # Check for fpm.toml (highest priority)
             if (current / "fpm.toml").exists():
-                if self.verbose:
+                if self._verbose:
                     print(f"Detected FPM build system in {current}")
                 return BuildSystemInfo("fpm", current)
 
             # Check for CMakeLists.txt
             if (current / "CMakeLists.txt").exists():
-                if self.verbose:
+                if self._verbose:
                     print(f"Detected CMake build system in {current}")
                 return BuildSystemInfo("cmake", current)
 
             # Check for Makefile
             if (current / "Makefile").exists():
-                if self.verbose:
+                if self._verbose:
                     print(f"Detected Make build system in {current}")
                 return BuildSystemInfo("make", current)
 
             current = current.parent
 
-        if self.verbose:
+        if self._verbose:
             print("No build system detected")
         return None
 
@@ -117,7 +117,7 @@ class BuildSystemDetector:
             if executable.exists():
                 return executable
 
-        if self.verbose:
+        if self._verbose:
             print(f"Warning: Could not find test executable in {build_dir}")
         return None
 
@@ -146,7 +146,7 @@ class BuildSystemDetector:
             if executable.exists():
                 return executable
 
-        if self.verbose:
+        if self._verbose:
             print(f"Warning: Could not find test executable in {build_dir}")
         return None
 
@@ -178,6 +178,6 @@ class BuildSystemDetector:
             if executable.exists():
                 return executable
 
-        if self.verbose:
+        if self._verbose:
             print("Warning: Could not find test executable")
         return None

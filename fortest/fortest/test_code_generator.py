@@ -26,7 +26,7 @@ class TestCodeGenerator:
         verbose : bool, optional
             Enable verbose output, by default False
         """
-        self.verbose: bool = verbose
+        self._verbose: bool = verbose
 
 
     def extract_test_subroutines(self, test_file: Path) -> list[str]:
@@ -64,7 +64,7 @@ class TestCodeGenerator:
                 seen.add(name)
                 test_subroutines.append(name)
 
-        if self.verbose:
+        if self._verbose:
             print(f"Found test subroutines: {test_subroutines}")
 
         return test_subroutines
@@ -141,7 +141,7 @@ class TestCodeGenerator:
         with open(generated_file, "w") as f:
             f.write(program_content)
 
-        if self.verbose:
+        if self._verbose:
             print(f"Generated program:\n{program_content}")
 
         return generated_file
@@ -180,7 +180,7 @@ class TestCodeGenerator:
         with open(generated_file, "w") as f:
             f.write(program_content)
 
-        if self.verbose:
+        if self._verbose:
             print(f"Generated error_stop test program:\n{program_content}")
 
         return generated_file
@@ -220,7 +220,7 @@ class TestCodeGenerator:
         with open(generated_file, "w") as f:
             f.write(program_content)
 
-        if self.verbose:
+        if self._verbose:
             print(f"Generated program for {test_subroutine}:\n{program_content}")
 
         return generated_file
