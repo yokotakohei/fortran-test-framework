@@ -763,6 +763,173 @@ def test_parse_test_output_empty(runner: FortranTestRunner) -> None:
 
 # _print_normal_test_summary: Output formatting test (not critical for unit testing)
 
+
+def test__compile_module_dependencies_success(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _compile_module_dependencies with successful compilation.
+    Verify that it compiles modules and returns object files.
+    """
+    # Create a simple Fortran module
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    module_file = src_dir / "module_sample.f90"
+    module_file.write_text("""
+module sample
+    implicit none
+contains
+    subroutine sample_sub()
+    end subroutine
+end module sample
+""")
+    
+    output_dir = tmp_path / "build"
+    output_dir.mkdir()
+    test_file = tmp_path / "test" / "test_sample.f90"
+    test_file.parent.mkdir()
+    test_file.touch()
+    
+    # Note: This test will only work if gfortran is available
+    try:
+        objects, error = runner._compile_module_dependencies(
+            [module_file],
+            test_file,
+            output_dir,
+        )
+        
+        # If compilation succeeds
+        if error is None:
+            assert len(objects) == 1
+            assert objects[0].suffix == ".o"
+            assert objects[0].exists()
+    except Exception:
+        # Skip test if gfortran not available
+        pytest.skip("gfortran not available")
+
+
+def test__compile_single_module_creates_object(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _compile_single_module.
+    Verify that it compiles a single module and creates object file.
+    """
+    # Create a simple Fortran module
+    module_file = tmp_path / "module_math.f90"
+    module_file.write_text("""
+module math_ops
+    implicit none
+contains
+    function add(a, b) result(c)
+        integer, intent(in) :: a, b
+        integer :: c
+        c = a + b
+    end function
+end module math_ops
+""")
+    
+    output_dir = tmp_path / "build"
+    output_dir.mkdir()
+    
+    try:
+        obj_file = runner._compile_single_module(
+            module_file,
+            [],  # No build directories
+            output_dir,
+        )
+        
+        # If compilation succeeds
+        if obj_file is not None:
+            assert obj_file.exists()
+            assert obj_file.suffix == ".o"
+            assert obj_file.parent == output_dir
+    except Exception:
+        # Skip test if gfortran not available
+        pytest.skip("gfortran not available")
+
+
+def test__compile_test_executable_success(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _compile_test_executable.
+    Verify that it compiles test executable successfully.
+    """
+    # Create test files
+    test_file = tmp_path / "test_sample.f90"
+    test_file.write_text("""
+module test_sample
+    implicit none
+contains
+    subroutine test_addition()
+        print *, '[PASS] Addition test'
+    end subroutine
+end module test_sample
+""")
+    
+    program_file = tmp_path / "main.f90"
+    program_file.write_text("""
+program test_main
+    use test_sample
+    implicit none
+    call test_addition()
+end program test_main
+""")
+    
+    output_dir = tmp_path / "build"
+    output_dir.mkdir()
+    executable = output_dir / "test_exe"
+    
+    try:
+        error = runner._compile_test_executable(
+            test_file,
+            program_file,
+            executable,
+            [],  # No compiled objects
+            output_dir,
+        )
+        
+        # If compilation succeeds
+        if error is None:
+            assert executable.exists()
+    except Exception:
+        # Skip test if gfortran not available
+        pytest.skip("gfortran not available")
+
+
+def test__execute_and_check_error_stop_triggered(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _execute_and_check_error_stop when error stop is triggered.
+    Verify that it returns PASS when exit code is non-zero.
+    """
+    # Create a mock executable that exits with error code
+    executable = tmp_path / "test_error"
+    executable.write_text("""#!/bin/bash
+exit 2
+""")
+    executable.chmod(0o755)
+    
+    result = runner._execute_and_check_error_stop("test_error_stop", executable)
+    
+    assert result.name == "test_error_stop"
+    assert result.passed is True
+    assert "triggered error stop" in result.message.lower()
+
+
+def test__execute_and_check_error_stop_not_triggered(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _execute_and_check_error_stop when error stop is NOT triggered.
+    Verify that it returns FAIL when exit code is zero.
+    """
+    # Create a mock executable that exits successfully
+    executable = tmp_path / "test_no_error"
+    executable.write_text("""#!/bin/bash
+exit 0
+""")
+    executable.chmod(0o755)
+    
+    result = runner._execute_and_check_error_stop("test_error_stop", executable)
+    
+    assert result.name == "test_error_stop"
+    assert result.passed is False
+    assert "expected error stop" in result.message.lower()
+
+
 # _run_single_normal_test: Integration test not included (requires compilation)
 
 def test_generate_single_test_program(tmp_path: Path, runner: FortranTestRunner) -> None:

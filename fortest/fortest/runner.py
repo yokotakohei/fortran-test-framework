@@ -377,8 +377,14 @@ class FortranTestRunner:
         str | None
             Module name in lowercase, or None if not found
         """
-        with open(file_path, "r") as f:
-            content: str = f.read()
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content: str = f.read()
+        except (UnicodeDecodeError, OSError):
+            # Skip files with encoding issues or read errors
+            if self.verbose:
+                print(f"Warning: Could not read {file_path} (encoding issue)")
+            return None
 
         # Remove comments
         content = re.sub(r"!.*$", "", content, flags=re.MULTILINE)
@@ -408,8 +414,14 @@ class FortranTestRunner:
         list[str]
             List of module names used in the file (lowercase, unique)
         """
-        with open(file_path, "r") as f:
-            content: str = f.read()
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content: str = f.read()
+        except (UnicodeDecodeError, OSError):
+            # Skip files with encoding issues or read errors
+            if self.verbose:
+                print(f"Warning: Could not read {file_path} (encoding issue)")
+            return []
 
         # Remove comments
         content = re.sub(r"!.*$", "", content, flags=re.MULTILINE)
@@ -1338,6 +1350,159 @@ class FortranTestRunner:
         print()
 
 
+    def _compile_module_dependencies(self,
+        module_files: list[Path],
+        test_file: Path,
+        output_dir: Path,
+    ) -> tuple[list[Path], str | None]:
+        """
+        Compile module dependencies.
+
+        Parameters
+        ----------
+        module_files : list[Path]
+            List of module files to compile
+        test_file : Path
+            Path to the test file (for finding build directories)
+        output_dir : Path
+            Directory for output objects
+
+        Returns
+        -------
+        tuple[list[Path], str | None]
+            Tuple of (compiled_objects, error_message)
+            Returns ([], None) on success, ([], error_msg) on failure
+        """
+        build_dirs = self._find_build_directories(test_file)
+        compiled_objects: list[Path] = []
+
+        for module_file in module_files:
+            compile_result = self._compile_single_module(
+                module_file,
+                build_dirs,
+                output_dir,
+            )
+
+            if compile_result is None:
+                return [], f"Failed to compile dependency {module_file.name}"
+
+            compiled_objects.append(compile_result)
+
+        return compiled_objects, None
+
+
+    def _compile_single_module(self,
+        module_file: Path,
+        build_dirs: list[Path],
+        output_dir: Path,
+    ) -> Path | None:
+        """
+        Compile a single module file.
+
+        Parameters
+        ----------
+        module_file : Path
+            Path to the module file
+        build_dirs : list[Path]
+            Build directories for module search path
+        output_dir : Path
+            Directory for output object
+
+        Returns
+        -------
+        Path | None
+            Path to compiled object file, or None on failure
+        """
+        compile_mod_cmd = [self.compiler, "-c", str(module_file)]
+
+        for build_dir in build_dirs:
+            compile_mod_cmd.extend(["-I", str(build_dir)])
+
+        output_obj = output_dir / f"{module_file.stem}.o"
+        compile_mod_cmd.extend([
+            "-J", str(output_dir),
+            "-o", str(output_obj),
+        ])
+
+        if self.verbose:
+            print(f"Compiling module dependency: {' '.join(compile_mod_cmd)}")
+
+        try:
+            subprocess.run(
+                compile_mod_cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return output_obj
+
+        except subprocess.CalledProcessError as e:
+            print(f"{Colors.RED.value}Compilation error:{Colors.RESET.value}")
+            print(f"  Module: {module_file.name}")
+            if e.stderr:
+                print(f"  Error details:")
+                print(e.stderr)
+            return None
+
+
+    def _compile_test_executable(self,
+        test_file: Path,
+        program_file: Path,
+        executable_path: Path,
+        compiled_objects: list[Path],
+        output_dir: Path,
+    ) -> str | None:
+        """
+        Compile test executable.
+
+        Parameters
+        ----------
+        test_file : Path
+            Path to the test file
+        program_file : Path
+            Path to the generated program file
+        executable_path : Path
+            Path for the output executable
+        compiled_objects : list[Path]
+            List of compiled object files
+        output_dir : Path
+            Directory for module files
+
+        Returns
+        -------
+        str | None
+            Error message if compilation failed, None on success
+        """
+        build_dirs = self._find_build_directories(test_file)
+        compile_cmd = [self.compiler, "-o", str(executable_path)]
+
+        for build_dir in build_dirs:
+            compile_cmd.extend(["-I", str(build_dir)])
+
+        compile_cmd.extend(["-I", str(output_dir), "-J", str(output_dir)])
+        compile_cmd.extend([str(obj) for obj in compiled_objects])
+        compile_cmd.append(str(test_file))
+        compile_cmd.append(str(program_file))
+
+        if self.verbose:
+            print(f"Compiling test: {' '.join(compile_cmd)}")
+
+        try:
+            subprocess.run(
+                compile_cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return None
+
+        except subprocess.CalledProcessError as e:
+            if e.stderr:
+                print(f"{Colors.RED.value}Compilation error:{Colors.RESET.value}")
+                print(e.stderr)
+            return f"Compilation failed: {e.stderr}"
+
+
     def _run_single_normal_test(self,
         test_file: Path,
         test_module_name: str,
@@ -1363,104 +1528,63 @@ class FortranTestRunner:
         TestResult
             Test result
         """
-        # Find module dependencies
-        module_files: list[Path] = self.find_module_files(test_file)
-
-        # Generate standalone program for this test
-        normal_program: Path = self.generate_single_test_program(
+        module_files = self.find_module_files(test_file)
+        normal_program = self.generate_single_test_program(
             test_module_name,
             test_subroutine,
             output_dir,
         )
 
         if self.verbose:
-            print(f"Generated program for {test_subroutine}:")
-            with open(normal_program, 'r') as f:
-                print(f.read())
+            print(f"Generated test program for {test_subroutine}: {normal_program}")
+            print(f"Module dependencies: {[m.name for m in module_files]}")
 
-        # Find build directories for pre-compiled modules
-        build_dirs: list[Path] = self._find_build_directories(test_file)
+        # Compile module dependencies
+        compiled_objects, error = self._compile_module_dependencies(
+            module_files,
+            test_file,
+            output_dir,
+        )
 
-        # Compile module dependencies that don't have pre-compiled versions
-        compiled_objects: list[Path] = []
-        for module_file in module_files:
-            compile_mod_cmd: list[str] = [
-                self.compiler,
-                "-c",
-                str(module_file),
-            ]
-            # Add build directories to module search path
-            for build_dir in build_dirs:
-                compile_mod_cmd.extend(["-I", str(build_dir)])
-            # Output to temp directory
-            compile_mod_cmd.extend([
-                "-J", str(output_dir),
-                "-o", str(output_dir / f"{module_file.stem}.o"),
-            ])
+        if error:
+            return TestResult(test_subroutine, False, error)
 
-            if self.verbose:
-                print(f"Compiling module dependency: {' '.join(compile_mod_cmd)}")
-            try:
-                subprocess.run(
-                    compile_mod_cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                compiled_objects.append(output_dir / f"{module_file.stem}.o")
-            except subprocess.CalledProcessError as e:
-                error_msg = f"Failed to compile dependency {module_file.name}"
-                print(f"{Colors.RED.value}Compilation error:{Colors.RESET.value}")
-                print(f"  Module: {module_file.name}")
-                if e.stderr:
-                    print(f"  Error details:")
-                    print(e.stderr)
-                return TestResult(
-                    test_subroutine,
-                    False,
-                    f"{error_msg}: {e.stderr}",
-                )
+        # Compile test executable
+        executable = output_dir / f"{test_subroutine}_normal"
+        error = self._compile_test_executable(
+            test_file,
+            normal_program,
+            executable,
+            compiled_objects,
+            output_dir,
+        )
 
-        # Compile test file and main program
-        executable: Path = output_dir / f"{test_subroutine}_normal"
-        compile_cmd: list[str] = [
-            self.compiler,
-            "-o", str(executable),
-        ]
-        # Add build directories to module search path
-        for build_dir in build_dirs:
-            compile_cmd.extend(["-I", str(build_dir)])
-        # Add temp directory for newly compiled modules
-        compile_cmd.extend(["-I", str(output_dir), "-J", str(output_dir)])
-        # Add compiled module objects
-        compile_cmd.extend([str(obj) for obj in compiled_objects])
-        compile_cmd.append(str(test_file))
-        compile_cmd.append(str(normal_program))
+        if error:
+            return TestResult(test_subroutine, False, error)
 
-        if self.verbose:
-            print(f"Compiling normal test {test_subroutine}: {' '.join(compile_cmd)}")
+        # Run the test and parse results
+        return self._execute_and_parse_normal_test(test_subroutine, executable)
 
-        try:
-            subprocess.run(
-                compile_cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-        except subprocess.CalledProcessError as e:
-            print(f"{Colors.RED.value}Compilation error for {test_subroutine}:{Colors.RESET.value}")
-            if e.stderr:
-                print(e.stderr)
-            return TestResult(
-                test_subroutine,
-                False,
-                f"Compilation failed: {e.stderr}",
-            )
 
-        # Run the test
-        success: bool
-        output: str
-        returncode: int
+    def _execute_and_parse_normal_test(self,
+        test_subroutine: str,
+        executable: Path,
+    ) -> TestResult:
+        """
+        Execute a normal test and parse its output.
+
+        Parameters
+        ----------
+        test_subroutine : str
+            Name of the test subroutine
+        executable : Path
+            Path to the test executable
+
+        Returns
+        -------
+        TestResult
+            Test result
+        """
         success, output, returncode = self.run_test_executable(executable)
 
         if not success:
@@ -1470,30 +1594,46 @@ class FortranTestRunner:
                 f"Test execution failed: {output}",
             )
 
-        # Parse output to get test results
-        results: list[TestResult] = self.parse_test_output(output)
+        results = self.parse_test_output(output)
 
-        # Print the raw output from the test (includes details like "xx vs yy")
-        # Only print if output is non-empty after stripping
         if output.strip():
             print(output.rstrip())
 
-        # If output parsing failed to find results, check return code
         if not results:
-            # If error stop occurred (non-zero return code), treat as failure
-            if returncode != 0:
-                print(f"{Colors.RED.value}{MessageTag.FAIL.value}{Colors.RESET.value} {test_subroutine}")
-                print(f"       Test caused error stop or abnormal termination (exit code {returncode})")
-                return TestResult(
-                    test_subroutine,
-                    False,
-                    f"Error stop or abnormal termination (exit code {returncode})",
-                )
-            # Otherwise no assertions were found, treat as passed
-            return TestResult(test_subroutine, True)
+            return self._handle_no_test_results(test_subroutine, returncode)
 
-        # Return the first result (should only be one per test)
         return results[0] if results else TestResult(test_subroutine, True)
+
+
+    def _handle_no_test_results(self,
+        test_subroutine: str,
+        returncode: int,
+    ) -> TestResult:
+        """
+        Handle case where no test results were parsed from output.
+
+        Parameters
+        ----------
+        test_subroutine : str
+            Name of the test subroutine
+        returncode : int
+            Exit code from test execution
+
+        Returns
+        -------
+        TestResult
+            Test result
+        """
+        if returncode != 0:
+            print(f"{Colors.RED.value}{MessageTag.FAIL.value}{Colors.RESET.value} {test_subroutine}")
+            print(f"       Test caused error stop or abnormal termination (exit code {returncode})")
+            return TestResult(
+                test_subroutine,
+                False,
+                f"Error stop or abnormal termination (exit code {returncode})",
+            )
+
+        return TestResult(test_subroutine, True)
 
 
     def generate_single_test_program(
@@ -1740,6 +1880,421 @@ class FortranTestRunner:
 
         all_results: list[TestResult] = []
 
+        # For FPM, we use direct compilation after building dependencies
+        # This approach is simpler and more consistent with CMake behavior
+        
+        # Find FPM build directory for module files
+        fpm_build_dirs = self._find_fpm_build_directories(build_system.project_dir)
+        
+        # Run normal tests using direct compilation
+        if normal_tests:
+            normal_results: list[TestResult] = self._compile_and_run_normal_tests_with_fpm(
+                test_file,
+                test_module_name,
+                normal_tests,
+                output_dir,
+                fpm_build_dirs,
+            )
+            all_results.extend(normal_results)
+
+        # Run error_stop tests individually using direct compilation
+        error_stop_results: list[TestResult] = []
+        for error_stop_test in error_stop_tests:
+            result: TestResult = self._run_single_error_stop_test_with_fpm(
+                test_file,
+                test_module_name,
+                error_stop_test,
+                output_dir,
+                fpm_build_dirs,
+            )
+            error_stop_results.append(result)
+            all_results.append(result)
+
+        # Print error_stop tests summary if any
+        if error_stop_results:
+            self._print_error_stop_summary(error_stop_results)
+
+        return all_results
+
+
+    def _find_fpm_build_directories(self, project_dir: Path) -> list[Path]:
+        """
+        Find FPM build directories containing module files.
+
+        Parameters
+        ----------
+        project_dir : Path
+            FPM project directory
+
+        Returns
+        -------
+        list[Path]
+            List of build directories
+        """
+        build_dirs: list[Path] = []
+        build_dir: Path = project_dir / "build"
+        
+        if not build_dir.exists():
+            return build_dirs
+        
+        # Add all FPM build directories
+        for gfortran_dir in build_dir.glob("gfortran_*"):
+            if gfortran_dir.is_dir():
+                build_dirs.append(gfortran_dir)
+                # Also add subdirectories that contain .mod files
+                for subdir in gfortran_dir.rglob("*"):
+                    if subdir.is_dir() and any(subdir.glob("*.mod")):
+                        build_dirs.append(subdir)
+        
+        # Also check dependencies
+        deps_dir = build_dir / "dependencies"
+        if deps_dir.exists():
+            for dep_build in deps_dir.rglob("build/gfortran_*"):
+                if dep_build.is_dir():
+                    build_dirs.append(dep_build)
+                    for subdir in dep_build.rglob("*"):
+                        if subdir.is_dir() and any(subdir.glob("*.mod")):
+                            build_dirs.append(subdir)
+        
+        return build_dirs
+
+
+    def _compile_and_run_normal_tests_with_fpm(self,
+        test_file: Path,
+        test_module_name: str,
+        normal_tests: list[str],
+        output_dir: Path,
+        fpm_build_dirs: list[Path],
+    ) -> list[TestResult]:
+        """
+        Compile and run normal tests using direct compilation with FPM build artifacts.
+
+        Parameters
+        ----------
+        test_file : Path
+            Path to the test file
+        test_module_name : str
+            Name of the test module
+        normal_tests : list[str]
+            List of normal test subroutine names
+        output_dir : Path
+            Directory for output executable
+        fpm_build_dirs : list[Path]
+            FPM build directories containing module files
+
+        Returns
+        -------
+        list[TestResult]
+            List of test results
+        """
+        all_results: list[TestResult] = []
+
+        # Run each normal test individually
+        for test_subroutine in normal_tests:
+            result: TestResult = self._run_single_normal_test_with_fpm(
+                test_file,
+                test_module_name,
+                test_subroutine,
+                output_dir,
+                fpm_build_dirs,
+            )
+            all_results.append(result)
+
+        # Print summary for normal tests if any were run
+        if all_results:
+            self._print_normal_test_summary(all_results)
+
+        return all_results
+
+
+    def _run_single_normal_test_with_fpm(self,
+        test_file: Path,
+        test_module_name: str,
+        test_subroutine: str,
+        output_dir: Path,
+        fpm_build_dirs: list[Path],
+    ) -> TestResult:
+        """
+        Run a single normal test using direct compilation with FPM build artifacts.
+
+        Parameters
+        ----------
+        test_file : Path
+            Path to the test file
+        test_module_name : str
+            Name of the test module
+        test_subroutine : str
+            Name of the test subroutine
+        output_dir : Path
+            Directory for output executable
+        fpm_build_dirs : list[Path]
+            FPM build directories containing module files
+
+        Returns
+        -------
+        TestResult
+            Test result
+        """
+        # Generate test driver program (no print_summary to avoid duplicate summaries)
+        fortest_assertions: str = FortranTestRunner.ASSERTION_MODULE
+        driver_content = f"program run_{test_subroutine}\n"
+        driver_content += f"    use {fortest_assertions}\n"
+        driver_content += f"    use {test_module_name}\n"
+        driver_content += "    implicit none\n"
+        driver_content += f"    call {test_subroutine}()\n"
+        driver_content += f"end program run_{test_subroutine}\n"
+        
+        driver_file = output_dir / f"test_driver_{test_subroutine}.f90"
+
+        with open(driver_file, "w") as f:
+            f.write(driver_content)
+
+        # Compile test with FPM build directories in include path
+        output_exe = output_dir / f"test_{test_subroutine}"
+        success, compile_output = self._compile_test_with_fpm_modules(
+            driver_file,
+            test_file,
+            output_exe,
+            fpm_build_dirs,
+        )
+
+        if not success:
+            error_msg = f"Compilation failed:\n{compile_output}"
+            print(f"{Colors.RED.value}{MessageTag.FAIL.value}{Colors.RESET.value} {test_subroutine}")
+            print(f"       {error_msg}")
+            return TestResult(test_subroutine, False, error_msg)
+
+        # Run the test
+        success, output, exit_code = self.run_test_executable(output_exe)
+
+        # Parse the output to check for assertion failures
+        # Even if exit_code == 0, the test may have failed assertions
+        has_fail = MessageTag.FAIL.value in output if output else False
+
+        # For normal tests, check both exit code and assertion results
+        # Print result immediately
+        if success and exit_code == 0 and not has_fail:
+            # Test passed
+            if output.strip():
+                print(output.rstrip())
+            return TestResult(test_subroutine, True, "")
+        else:
+            # Test failed (either error stop or assertion failure)
+            if output.strip():
+                print(output.rstrip())
+            
+            if not success or exit_code != 0:
+                # Error stop or abnormal termination
+                print(f"{Colors.RED.value}{MessageTag.FAIL.value}{Colors.RESET.value} {test_subroutine}")
+                print(f"       Test caused error stop or abnormal termination (exit code {exit_code})")
+                return TestResult(test_subroutine, False, f"Error stop (exit code {exit_code})")
+            else:
+                # Assertion failure - output already printed above
+                return TestResult(test_subroutine, False, "Assertion failed")
+
+
+    def _run_single_error_stop_test_with_fpm(self,
+        test_file: Path,
+        test_module_name: str,
+        test_subroutine: str,
+        output_dir: Path,
+        fpm_build_dirs: list[Path],
+    ) -> TestResult:
+        """
+        Run a single error_stop test using direct compilation with FPM build artifacts.
+
+        Parameters
+        ----------
+        test_file : Path
+            Path to the test file
+        test_module_name : str
+            Name of the test module
+        test_subroutine : str
+            Name of the test subroutine
+        output_dir : Path
+            Directory for output executable
+        fpm_build_dirs : list[Path]
+            FPM build directories containing module files
+
+        Returns
+        -------
+        TestResult
+            Test result
+        """
+        # Generate test driver program (no print_summary for error_stop tests)
+        driver_content = f"program run_{test_subroutine}\n"
+        driver_content += f"    use {test_module_name}\n"
+        driver_content += "    implicit none\n"
+        driver_content += f"    call {test_subroutine}()\n"
+        driver_content += f"end program run_{test_subroutine}\n"
+        
+        driver_file = output_dir / f"test_driver_{test_subroutine}.f90"
+
+        with open(driver_file, "w") as f:
+            f.write(driver_content)
+
+        # Compile test with FPM build directories in include path
+        output_exe = output_dir / f"test_{test_subroutine}"
+        success, compile_output = self._compile_test_with_fpm_modules(
+            driver_file,
+            test_file,
+            output_exe,
+            fpm_build_dirs,
+        )
+
+        if not success:
+            error_msg = f"Compilation failed:\n{compile_output}"
+            print(f"{Colors.RED.value}{MessageTag.FAIL.value}{Colors.RESET.value} {test_subroutine}")
+            print(f"       {error_msg}")
+            return TestResult(test_subroutine, False, error_msg)
+
+        # Run the test - for error_stop tests, we expect non-zero exit code
+        passed, output, exit_code = self.run_test_executable(output_exe)
+
+        # For error_stop tests, success means the test triggered error stop (exit_code != 0)
+        if exit_code != 0:
+            # Test correctly triggered error stop - don't print here, will be printed by summary
+            return TestResult(test_subroutine, True, "Correctly triggered error stop")
+        else:
+            # Test did not trigger error stop when it should have - don't print here, will be printed by summary
+            return TestResult(test_subroutine, False, "Expected error stop but test completed normally")
+
+
+    def _compile_test_with_fpm_modules(self,
+        driver_file: Path,
+        test_file: Path,
+        output_exe: Path,
+        fpm_build_dirs: list[Path],
+    ) -> tuple[bool, str]:
+        """
+        Compile test using gfortran with FPM build directories.
+
+        Parameters
+        ----------
+        driver_file : Path
+            Path to the test driver file
+        test_file : Path
+            Path to the test file
+        output_exe : Path
+            Path to the output executable
+        fpm_build_dirs : list[Path]
+            FPM build directories containing module files
+
+        Returns
+        -------
+        tuple[bool, str]
+            (success, output)
+        """
+        # Find module dependencies
+        module_files = self.find_module_files(test_file, include_assertions=True)
+
+        # Build compile command with FPM build directories
+        compile_cmd = [self.compiler, "-o", str(output_exe)]
+        
+        # Add include paths for FPM build directories
+        for build_dir in fpm_build_dirs:
+            compile_cmd.extend(["-I", str(build_dir)])
+        
+        # Add module files
+        for mod_file in module_files:
+            compile_cmd.append(str(mod_file))
+        
+        # Add test file and driver
+        compile_cmd.append(str(test_file))
+        compile_cmd.append(str(driver_file))
+
+        if self.verbose:
+            print(f"Compiling: {' '.join(compile_cmd)}")
+
+        result = subprocess.run(
+            compile_cmd,
+            capture_output=True,
+            text=True,
+        )
+
+        return (result.returncode == 0, result.stdout + result.stderr)
+
+
+    def _handle_normal_test_with_fpm_old(self,
+        test_file: Path,
+        build_system: BuildSystemInfo,
+        output_dir: Path,
+    ) -> list[TestResult]:
+        """
+        OLD: Handle normal test execution using FPM build system.
+        This approach tried to use fpm test/run but had issues with auto-executables=false.
+        Kept for reference but not used.
+
+        Parameters
+        ----------
+        test_file : Path
+            Path to the test file
+        build_system : BuildSystemInfo
+            Build system information
+        output_dir : Path
+            Directory for output executable (not used with FPM)
+
+        Returns
+        -------
+        list[TestResult]
+            List of test results
+        """
+        if self.verbose:
+            print(f"Using FPM build system at {build_system.project_dir}")
+
+        # Extract test information
+        test_module_name: str | None = self.extract_module_name(test_file)
+        if not test_module_name:
+            print(
+                f"{Colors.YELLOW.value}Warning: Could not find module in "
+                f"{test_file}{Colors.RESET.value}"
+            )
+            return []
+
+        all_test_subroutines: list[str] = self.extract_test_subroutines(test_file)
+        if not all_test_subroutines:
+            print(
+                f"{Colors.YELLOW.value}Warning: No test subroutines found in "
+                f"{test_file}{Colors.RESET.value}"
+            )
+            return []
+
+        if self.verbose:
+            print(f"Found test subroutines: {all_test_subroutines}")
+
+        # Run fpm build to compile all sources and tests
+        build_cmd: list[str] = ["fpm", "build"]
+
+        if self.verbose:
+            print(f"Building with FPM: {' '.join(build_cmd)}")
+
+        try:
+            result = subprocess.run(
+                build_cmd,
+                cwd=build_system.project_dir,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            if self.verbose and result.stdout:
+                print(result.stdout)
+        except subprocess.CalledProcessError as e:
+            print(f"{Colors.RED.value}FPM build failed:{Colors.RESET.value}")
+            if e.stderr:
+                print(e.stderr)
+            if e.stdout:
+                print(e.stdout)
+            # Return failure for all tests
+            return [
+                TestResult(test_name, False, f"FPM build failed: {e.stderr}")
+                for test_name in all_test_subroutines
+            ]
+
+        # Separate normal tests from error_stop tests
+        normal_tests, error_stop_tests = self.separate_error_stop_tests(all_test_subroutines)
+
+        all_results: list[TestResult] = []
+
         # Run normal tests
         if normal_tests:
             for test_subroutine in normal_tests:
@@ -1897,10 +2452,11 @@ class FortranTestRunner:
         TestResult
             Test result
         """
-        # Create a temporary test program in the project's test directory
-        # FPM requires test files to be in the test/ directory
+        # Create a temporary test program in the project's app directory
+        # We use app/ instead of test/ because auto-tests may be disabled in fpm.toml
         import os
-        temp_test_dir = build_system.project_dir / "test"
+        temp_test_dir = build_system.project_dir / "app"
+        temp_test_dir.mkdir(exist_ok=True)
 
         # Generate unique temporary filename and program name
         temp_test_file, temp_program_name = self._generate_temp_test_filename(
@@ -1923,14 +2479,56 @@ class FortranTestRunner:
             if self.verbose:
                 print(f"Created temporary test program: {temp_test_file}")
 
-            # Run fpm test for this specific test
-            test_cmd: list[str] = ["fpm", "test", temp_program_name]
+            # Build the test with FPM
+            build_cmd: list[str] = ["fpm", "build", temp_program_name, "--flag", "-g"]
 
             if self.verbose:
-                print(f"Running test with FPM: {' '.join(test_cmd)}")
+                print(f"Building test with FPM: {' '.join(build_cmd)}")
+
+            build_result = subprocess.run(
+                build_cmd,
+                cwd=build_system.project_dir,
+                capture_output=True,
+                text=True,
+            )
+
+            if build_result.returncode != 0:
+                build_output = build_result.stdout if build_result.stdout else build_result.stderr
+                if self.verbose:
+                    print(f"FPM build failed:\n{build_output}")
+                return TestResult(
+                    test_subroutine,
+                    False,
+                    f"FPM build failed: {build_output}",
+                )
+
+            # Find the compiled test executable in app/ directory
+            build_dir = build_system.project_dir / "build"
+            test_executable = None
+            
+            # FPM puts app executables in build/gfortran_*/app/
+            for app_dir in build_dir.glob("gfortran_*/app"):
+                candidate = app_dir / temp_program_name
+                if candidate.exists():
+                    test_executable = candidate
+                    break
+
+            if not test_executable or not test_executable.exists():
+                error_msg = f"Could not find test executable for {temp_program_name}"
+                if self.verbose:
+                    print(f"{Colors.YELLOW.value}{error_msg}{Colors.RESET.value}")
+                return TestResult(
+                    test_subroutine,
+                    False,
+                    error_msg,
+                )
+
+            # Run the test executable directly
+            if self.verbose:
+                print(f"Running test executable: {test_executable}")
 
             result = subprocess.run(
-                test_cmd,
+                [str(test_executable)],
                 cwd=build_system.project_dir,
                 capture_output=True,
                 text=True,
@@ -1949,20 +2547,14 @@ class FortranTestRunner:
             # For error_stop tests, check return code
             if is_error_stop:
                 if result.returncode != 0:
-                    print(
-                        f"{Colors.GREEN.value}{MessageTag.PASS.value}{Colors.RESET.value} "
-                        f"{test_subroutine} (error_stop expected)"
-                    )
+                    # Don't print here - will be printed by _print_error_stop_summary
                     return TestResult(
                         f"{test_subroutine} (error_stop expected)",
                         True,
                         "Correctly triggered error stop",
                     )
                 else:
-                    print(
-                        f"{Colors.RED.value}{MessageTag.FAIL.value}{Colors.RESET.value} "
-                        f"{test_subroutine} (error_stop expected)"
-                    )
+                    # Don't print here - will be printed by _print_error_stop_summary
                     return TestResult(
                         f"{test_subroutine} (error_stop expected)",
                         False,
@@ -2220,87 +2812,59 @@ class FortranTestRunner:
         TestResult
             Test result
         """
-        # Find module dependencies
-        module_files: list[Path] = self.find_module_files(test_file)
-
-        # Generate standalone program for this error_stop test
-        error_program: Path = self.generate_error_stop_test_program(
+        module_files = self.find_module_files(test_file)
+        error_program = self.generate_error_stop_test_program(
             test_module_name,
             test_subroutine,
             output_dir,
         )
 
-        # Find build directories for pre-compiled modules
-        build_dirs: list[Path] = self._find_build_directories(test_file)
+        # Compile module dependencies
+        compiled_objects, error = self._compile_module_dependencies(
+            module_files,
+            test_file,
+            output_dir,
+        )
 
-        # Compile module dependencies that don't have pre-compiled versions
-        compiled_objects: list[Path] = []
-        for module_file in module_files:
-            compile_mod_cmd: list[str] = [
-                self.compiler,
-                "-c",
-                str(module_file),
-            ]
-            # Add build directories to module search path
-            for build_dir in build_dirs:
-                compile_mod_cmd.extend(["-I", str(build_dir)])
-            # Output to temp directory
-            compile_mod_cmd.extend([
-                "-J", str(output_dir),
-                "-o", str(output_dir / f"{module_file.stem}.o"),
-            ])
+        if error:
+            return TestResult(test_subroutine, False, error)
 
-            if self.verbose:
-                print(f"Compiling module dependency: {' '.join(compile_mod_cmd)}")
-            try:
-                subprocess.run(
-                    compile_mod_cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                compiled_objects.append(output_dir / f"{module_file.stem}.o")
-            except subprocess.CalledProcessError as e:
-                return TestResult(
-                    test_subroutine,
-                    False,
-                    f"Failed to compile dependency {module_file.name}: {e.stderr}",
-                )
+        # Compile test executable
+        executable = output_dir / test_subroutine
+        error = self._compile_test_executable(
+            test_file,
+            error_program,
+            executable,
+            compiled_objects,
+            output_dir,
+        )
 
-        # Compile test file and main program
-        executable: Path = output_dir / test_subroutine
-        compile_cmd: list[str] = [
-            self.compiler,
-            "-o", str(executable),
-        ]
-        # Add build directories to module search path
-        for build_dir in build_dirs:
-            compile_cmd.extend(["-I", str(build_dir)])
-        # Add temp directory for newly compiled modules
-        compile_cmd.extend(["-I", str(output_dir), "-J", str(output_dir)])
-        # Add compiled module objects
-        compile_cmd.extend([str(obj) for obj in compiled_objects])
-        compile_cmd.append(str(test_file))
-        compile_cmd.append(str(error_program))
-
-        if self.verbose:
-            print(f"Compiling error_stop test {test_subroutine}: {' '.join(compile_cmd)}")
-
-        try:
-            subprocess.run(
-                compile_cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-        except subprocess.CalledProcessError as e:
-            return TestResult(
-                test_subroutine,
-                False,
-                f"Compilation failed: {e.stderr}",
-            )
+        if error:
+            return TestResult(test_subroutine, False, error)
 
         # Run and check for error stop
+        return self._execute_and_check_error_stop(test_subroutine, executable)
+
+
+    def _execute_and_check_error_stop(self,
+        test_subroutine: str,
+        executable: Path,
+    ) -> TestResult:
+        """
+        Execute error_stop test and check if it triggered error stop correctly.
+
+        Parameters
+        ----------
+        test_subroutine : str
+            Name of the test subroutine
+        executable : Path
+            Path to the test executable
+
+        Returns
+        -------
+        TestResult
+            Test result
+        """
         _, _, returncode = self.run_test_executable(executable)
 
         # error stop should cause non-zero return code
@@ -2311,12 +2875,12 @@ class FortranTestRunner:
                 True,
                 f"Correctly triggered error stop (exit code {returncode})",
             )
-        else:
-            return TestResult(
-                test_subroutine,
-                False,
-                "Expected error stop but test completed normally",
-            )
+
+        return TestResult(
+            test_subroutine,
+            False,
+            "Expected error stop but test completed normally",
+        )
 
 
     def run_tests(self, test_files: list[Path]) -> None:
