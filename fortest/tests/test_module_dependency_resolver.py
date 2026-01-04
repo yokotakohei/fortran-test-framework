@@ -272,3 +272,168 @@ def test_find_user_modules(
     # Should find only user modules
     found_names = {f.stem for f in found_modules}
     assert found_names == {"module_a", "module_b"}
+
+
+def test_find_user_modules_recursive_with_transitive_dependencies(
+    tmp_path: Path,
+    resolver: ModuleDependencyResolver,
+) -> None:
+    """
+    Test _find_user_modules_recursive.
+    Verify that it recursively finds transitive dependencies in correct compilation order.
+    """
+    # Create directory structure
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+
+    # Create base module (no dependencies)
+    base_module = src_dir / "base_module.f90"
+    base_module.write_text("module base_module\nend module base_module\n")
+
+    # Create middle module (depends on base_module)
+    middle_module = src_dir / "middle_module.f90"
+    middle_module.write_text("""module middle_module
+    use base_module
+end module middle_module
+""")
+
+    # Create top module (depends on middle_module)
+    top_module = src_dir / "top_module.f90"
+    top_module.write_text("""module top_module
+    use middle_module
+end module top_module
+""")
+
+    # Create test file
+    test_dir = tmp_path / "test"
+    test_dir.mkdir()
+    test_file = test_dir / "test_sample.f90"
+    test_file.write_text("module test_sample\nend module test_sample\n")
+
+    # Test recursive dependency resolution
+    used_modules = ["top_module"]
+    search_dirs = [src_dir]
+    modules: list[Path] = []
+    processed: set[Path] = set()
+
+    resolver._find_user_modules_recursive(
+        used_modules, search_dirs, test_file, modules, processed
+    )
+
+    # Should find all three modules in dependency order (base first)
+    module_names = [f.stem for f in modules]
+    assert module_names == ["base_module", "middle_module", "top_module"]
+
+
+def test_find_user_modules_recursive_avoids_circular_dependencies(
+    tmp_path: Path,
+    resolver: ModuleDependencyResolver,
+) -> None:
+    """
+    Test _find_user_modules_recursive with circular dependencies.
+    Verify that it handles circular dependencies without infinite recursion.
+    """
+    # Create directory structure
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+
+    # Create module_a (depends on module_b)
+    module_a = src_dir / "module_a.f90"
+    module_a.write_text("""module module_a
+    use module_b
+end module module_a
+""")
+
+    # Create module_b (depends on module_a - circular!)
+    module_b = src_dir / "module_b.f90"
+    module_b.write_text("""module module_b
+    use module_a
+end module module_b
+""")
+
+    # Create test file
+    test_dir = tmp_path / "test"
+    test_dir.mkdir()
+    test_file = test_dir / "test_sample.f90"
+    test_file.write_text("module test_sample\nend module test_sample\n")
+
+    # Test with circular dependency
+    used_modules = ["module_a"]
+    search_dirs = [src_dir]
+    modules: list[Path] = []
+    processed: set[Path] = set()
+
+    # Should not raise an error or hang
+    resolver._find_user_modules_recursive(
+        used_modules, search_dirs, test_file, modules, processed
+    )
+
+    # Should find both modules (order may vary, but both should be present)
+    module_names = {f.stem for f in modules}
+    assert module_names == {"module_a", "module_b"}
+    # Should only find each module once
+    assert len(modules) == 2
+
+
+def test_find_module_files_resolves_transitive_dependencies(
+    tmp_path: Path,
+    resolver: ModuleDependencyResolver,
+) -> None:
+    """
+    Test find_module_files with transitive dependencies.
+    Verify that it finds all dependencies including transitive ones in correct order.
+    """
+    # Create project layout
+    project = tmp_path
+    (project / "fortran" / "src").mkdir(parents=True)
+    assertions = project / "fortran" / "src" / "module_fortest_assertions.f90"
+    assertions.write_text(
+        "module fortest_assertions\nend module fortest_assertions\n"
+    )
+
+    # Create source modules with dependency chain
+    (project / "src").mkdir()
+    
+    # Base module (no dependencies)
+    abstract_solver = project / "src" / "abstract_solver.f90"
+    abstract_solver.write_text("module abstract_solver\nend module abstract_solver\n")
+    
+    # Base class (depends on abstract_solver)
+    base_solver = project / "src" / "base_solver.f90"
+    base_solver.write_text("""module base_solver
+    use abstract_solver
+end module base_solver
+""")
+    
+    # Concrete implementation (depends on base_solver)
+    ftcs_solver = project / "src" / "ftcs_solver.f90"
+    ftcs_solver.write_text("""module ftcs_solver
+    use base_solver
+end module ftcs_solver
+""")
+
+    # Create test file (uses ftcs_solver)
+    (project / "test").mkdir()
+    test_file = project / "test" / "test_solver.f90"
+    test_file.write_text("""module test_solver
+    use fortest_assertions
+    use ftcs_solver
+end module test_solver
+""")
+
+    # Test find_module_files
+    found = resolver.find_module_files(test_file, include_assertions=True)
+
+    # Should find all modules in correct dependency order
+    # Order: assertions, abstract_solver, base_solver, ftcs_solver
+    module_names = [f.stem for f in found]
+    
+    # Verify all modules are found
+    assert "module_fortest_assertions" in module_names
+    assert "abstract_solver" in module_names
+    assert "base_solver" in module_names
+    assert "ftcs_solver" in module_names
+    
+    # Verify correct compilation order (dependencies before dependents)
+    assert module_names.index("abstract_solver") < module_names.index("base_solver")
+    assert module_names.index("base_solver") < module_names.index("ftcs_solver")

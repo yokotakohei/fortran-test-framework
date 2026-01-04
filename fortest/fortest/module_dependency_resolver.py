@@ -71,26 +71,29 @@ class ModuleDependencyResolver:
         Returns
         -------
         list[Path]
-            List of module file paths that the test depends on (direct dependencies only)
+            List of module file paths that the test depends on (includes transitive dependencies)
         """
         modules: list[Path] = []
+        processed: set[Path] = set()
         test_file_abs: Path = test_file.resolve()
-
-        # Extract module names used in the test file
-        used_modules: list[str] = self.extract_use_statements(test_file_abs)
 
         # Build search directories
         search_dirs: list[Path] = self._build_search_directories(test_file_abs)
+
+        # Extract module names used in the test file
+        used_modules: list[str] = self.extract_use_statements(test_file_abs)
 
         # Find fortest_assertions if needed
         if include_assertions and self.ASSERTION_MODULE in used_modules:
             assertion_module = self._find_assertion_module(search_dirs)
             if assertion_module:
                 modules.append(assertion_module)
+                processed.add(assertion_module)
 
-        # Find user modules
-        user_modules = self._find_user_modules(used_modules, search_dirs, test_file_abs)
-        modules.extend(user_modules)
+        # Find user modules recursively
+        self._find_user_modules_recursive(
+            used_modules, search_dirs, test_file_abs, modules, processed
+        )
 
         return modules
 
@@ -425,3 +428,59 @@ class ModuleDependencyResolver:
                 print(f"Found dependency: {module_file} (provides {module_name})")
 
         return modules
+
+
+    def _find_user_modules_recursive(
+        self,
+        used_modules: list[str],
+        search_dirs: list[Path],
+        test_file: Path,
+        modules: list[Path],
+        processed: set[Path],
+    ) -> None:
+        """
+        Recursively find user module files and their dependencies.
+
+        Parameters
+        ----------
+        used_modules : list[str]
+            List of module names to find
+        search_dirs : list[Path]
+            Directories to search in
+        test_file : Path
+            Path to the test file (to avoid including itself)
+        modules : list[Path]
+            List to accumulate found module files (modified in-place)
+        processed : set[Path]
+            Set of already processed files to avoid infinite recursion
+        """
+        test_file_abs: Path = test_file.resolve()
+
+        for module_name in used_modules:
+            # Skip intrinsic modules and fortest_assertions
+            if module_name in self.INTRINSIC_MODULES or module_name == self.ASSERTION_MODULE:
+                continue
+
+            # Find module file for this dependency
+            module_file = self.find_module_file_by_name(module_name, search_dirs)
+
+            if not module_file:
+                continue
+
+            # Skip test file and already processed modules
+            if module_file == test_file_abs or module_file in processed:
+                continue
+
+            # Mark as processed to avoid infinite recursion
+            processed.add(module_file)
+
+            # Recursively find dependencies of this module FIRST
+            nested_modules = self.extract_use_statements(module_file)
+            self._find_user_modules_recursive(
+                nested_modules, search_dirs, test_file, modules, processed
+            )
+
+            # Add this module AFTER its dependencies
+            modules.append(module_file)
+            if self._verbose:
+                print(f"Found dependency: {module_file} (provides {module_name})")
