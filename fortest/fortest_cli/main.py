@@ -56,23 +56,35 @@ def main() -> int:
     """
     Main function for CLI.
     """
-    args = get_arguments()
-    runner = FortranTestRunner(
-        compiler=args.compiler,
-        verbose=args.verbose,
-        build_dir=args.build_dir,
-    )
-    test_files = runner.find_test_files(args.pattern)
-    if not test_files:
-        print(
-            f"{Colors.YELLOW.value}No test files matching '{args.pattern}' found"
-            f"{Colors.RESET.value}"
+    try:
+        args = get_arguments()
+        runner = FortranTestRunner(
+            compiler=args.compiler,
+            verbose=args.verbose,
+            build_dir=args.build_dir,
         )
+        test_files = runner.find_test_files(args.pattern)
+        if not test_files:
+            print(
+                f"{Colors.YELLOW.value}No test files matching '{args.pattern}' found"
+                f"{Colors.RESET.value}"
+            )
+            return ExitStatus.ERROR.value
+        
+        runner.run_tests(test_files)
+
+        return runner.print_summary()
+    
+    except KeyboardInterrupt:
+        print(f"\n{Colors.YELLOW.value}Test execution interrupted by user{Colors.RESET.value}")
         return ExitStatus.ERROR.value
     
-    runner.run_tests(test_files)
-
-    return runner.print_summary()
+    except Exception as e:
+        print(f"{Colors.RED.value}Error: {e}{Colors.RESET.value}")
+        if args.verbose if "args" in locals() else False:
+            import traceback
+            traceback.print_exc()
+        return ExitStatus.ERROR.value
 
 
 if __name__ == "__main__":
