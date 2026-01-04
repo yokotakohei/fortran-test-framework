@@ -1,5 +1,6 @@
 """
 Tests of fortest/runner.py
+Tests are ordered according to method definitions in runner.py.
 """
 from pathlib import Path
 
@@ -24,6 +25,12 @@ def write_file(path: Path, content: str) -> None:
     path.write_text(content)
 
 
+# ============================================================================
+# Tests for methods in order of definition in runner.py
+# ============================================================================
+
+# __init__ - tested implicitly through fixture
+
 def test_find_test_files(tmp_path: Path, runner: FortranTestRunner) -> None:
     """
     Tests find_test_files.
@@ -44,6 +51,37 @@ def test_find_test_files(tmp_path: Path, runner: FortranTestRunner) -> None:
     # Should find both files
     names = [p.name for p in res]
     assert names == ["test_one.f90", "module_test_two.f90"]
+
+
+def test__find_build_directories(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _find_build_directories.
+    Verify that it finds build directories with .mod and .o files.
+    """
+    # Create directory structure
+    project = tmp_path / "project"
+    build_dir = project / "build"
+    build_dir.mkdir(parents=True)
+    
+    # Create some .mod and .o files
+    (build_dir / "module1.mod").write_text("")
+    (build_dir / "module1.o").write_text("")
+    
+    # Create nested build directory
+    nested_build = project / "src" / "build"
+    nested_build.mkdir(parents=True)
+    (nested_build / "module2.mod").write_text("")
+    
+    # Create test file
+    test_dir = project / "test"
+    test_dir.mkdir()
+    test_file = test_dir / "test_sample.f90"
+    test_file.write_text("")
+    
+    build_dirs = runner._find_build_directories(test_file)
+    
+    # Should find the build directories
+    assert build_dir in build_dirs or nested_build in build_dirs
 
 
 def test__build_search_directories(tmp_path: Path, runner: FortranTestRunner) -> None:
@@ -171,6 +209,17 @@ def test_extract_module_name(tmp_path: Path, runner: FortranTestRunner) -> None:
     assert name == "my_module"
 
 
+def test_extract_module_name_no_module(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test extract_module_name when no module is defined.
+    Verify that it returns None.
+    """
+    f = tmp_path / "program.f90"
+    write_file(f, "program main\nend program main\n")
+    name = runner.extract_module_name(f)
+    assert name is None
+
+
 def test_extract_use_statements(tmp_path: Path, runner: FortranTestRunner) -> None:
     """
     Test extract_use_statements.
@@ -197,6 +246,28 @@ end module sample
 
     # Should find all use statements (lowercase, unique), comment should be ignored
     assert uses == ["iso_fortran_env", "module_a", "iso_c_binding", "module_b", "module_d"]
+
+
+def test_extract_use_statements_with_comments(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test extract_use_statements with comments.
+    Verify that commented use statements are ignored.
+    """
+    f = tmp_path / "sample.f90"
+    content = """
+module sample
+    use module_a
+    ! use module_b
+    use module_c
+end module sample
+"""
+    write_file(f, content)
+    uses = runner.extract_use_statements(f)
+    
+    # module_b should not be in the list (it's commented out)
+    assert "module_a" in uses
+    assert "module_c" in uses
+    assert "module_b" not in uses
 
 
 def test_find_fortran_files_recursive(tmp_path: Path, runner: FortranTestRunner) -> None:
@@ -331,6 +402,125 @@ def test_generate_error_stop_test_program(tmp_path: Path, runner: FortranTestRun
 end program run_test_error_stop_divide_by_zero\n"""
 
     assert text == expected
+
+
+def test_detect_build_system_fpm(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test detect_build_system with FPM.
+    Verify that it detects fpm.toml and returns FPM build info.
+    """
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    
+    # Create fpm.toml
+    fpm_toml = project_dir / "fpm.toml"
+    fpm_toml.write_text("[package]\nname = 'test'\n")
+    
+    # Create test directory
+    test_dir = project_dir / "test"
+    test_dir.mkdir()
+    test_file = test_dir / "test_sample.f90"
+    test_file.write_text("")
+    
+    build_info = runner.detect_build_system(test_file)
+    
+    assert build_info is not None
+    assert build_info.build_type == "fpm"
+    assert build_info.project_dir == project_dir
+
+
+def test_detect_build_system_cmake(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test detect_build_system with CMake.
+    Verify that it detects CMakeLists.txt and returns CMake build info.
+    """
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    
+    # Create CMakeLists.txt
+    cmake_file = project_dir / "CMakeLists.txt"
+    cmake_file.write_text("project(test)\n")
+    
+    # Create test directory
+    test_dir = project_dir / "test"
+    test_dir.mkdir()
+    test_file = test_dir / "test_sample.f90"
+    test_file.write_text("")
+    
+    build_info = runner.detect_build_system(test_file)
+    
+    assert build_info is not None
+    assert build_info.build_type == "cmake"
+    assert build_info.project_dir == project_dir
+
+
+def test_detect_build_system_make(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test detect_build_system with Make.
+    Verify that it detects Makefile and returns Make build info.
+    """
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    
+    # Create Makefile
+    makefile = project_dir / "Makefile"
+    makefile.write_text("all:\n\techo test\n")
+    
+    # Create test directory
+    test_dir = project_dir / "test"
+    test_dir.mkdir()
+    test_file = test_dir / "test_sample.f90"
+    test_file.write_text("")
+    
+    build_info = runner.detect_build_system(test_file)
+    
+    assert build_info is not None
+    assert build_info.build_type == "make"
+    assert build_info.project_dir == project_dir
+
+
+def test_detect_build_system_priority_fpm_over_cmake(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test detect_build_system priority.
+    Verify that FPM takes priority over CMake when both exist.
+    """
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    
+    # Create both fpm.toml and CMakeLists.txt
+    fpm_toml = project_dir / "fpm.toml"
+    fpm_toml.write_text("[package]\nname = 'test'\n")
+    cmake_file = project_dir / "CMakeLists.txt"
+    cmake_file.write_text("project(test)\n")
+    
+    # Create test directory
+    test_dir = project_dir / "test"
+    test_dir.mkdir()
+    test_file = test_dir / "test_sample.f90"
+    test_file.write_text("")
+    
+    build_info = runner.detect_build_system(test_file)
+    
+    assert build_info is not None
+    assert build_info.build_type == "fpm"
+
+
+def test_detect_build_system_none(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test detect_build_system when no build system is found.
+    Verify that it returns None.
+    """
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    
+    test_dir = project_dir / "test"
+    test_dir.mkdir()
+    test_file = test_dir / "test_sample.f90"
+    test_file.write_text("")
+    
+    build_info = runner.detect_build_system(test_file)
+    
+    assert build_info is None
 
 
 def test__find_cmake_executable(tmp_path: Path, runner: FortranTestRunner) -> None:
@@ -481,6 +671,10 @@ def test__find_make_executable_not_found(tmp_path: Path, runner: FortranTestRunn
     assert found is None
 
 
+# _build_with_cmake, _build_with_fpm, _build_with_make: Integration tests not included (require actual build systems)
+
+# build_with_system: Integration test not included (requires actual build systems)
+
 def test__is_standalone_program_with_program_statement(tmp_path: Path, runner: FortranTestRunner) -> None:
     """
     Test _is_standalone_program with program statement.
@@ -512,3 +706,100 @@ def test__is_standalone_program_with_module(tmp_path: Path, runner: FortranTestR
     test_file.write_text("module test_sample\nend module test_sample\n")
 
     assert runner._is_standalone_program(test_file) is False
+
+
+# _compile_standalone_program, _compile_module_test: Complex integration tests not included
+
+# compile_test: Integration test not included (requires actual compilation)
+
+# run_test_executable: Integration test not included (requires actual executables)
+
+def test_parse_test_output_with_pass(runner: FortranTestRunner) -> None:
+    """
+    Test parse_test_output with passing tests.
+    Verify that it correctly parses [PASS] tags.
+    """
+    output = "[PASS] test_addition\n[PASS] test_subtraction"
+    results = runner.parse_test_output(output)
+    
+    assert len(results) == 2
+    assert results[0].name == "test_addition"
+    assert results[0].passed is True
+    assert results[1].name == "test_subtraction"
+    assert results[1].passed is True
+
+
+def test_parse_test_output_with_fail(runner: FortranTestRunner) -> None:
+    """
+    Test parse_test_output with failing tests.
+    Verify that it correctly parses [FAIL] tags.
+    """
+    output = "[FAIL] test_division\n[PASS] test_addition"
+    results = runner.parse_test_output(output)
+    
+    assert len(results) == 2
+    assert results[0].name == "test_division"
+    assert results[0].passed is False
+    assert results[1].name == "test_addition"
+    assert results[1].passed is True
+
+
+def test_parse_test_output_empty(runner: FortranTestRunner) -> None:
+    """
+    Test parse_test_output with empty output.
+    Verify that it returns an empty list.
+    """
+    output = ""
+    results = runner.parse_test_output(output)
+    
+    assert results == []
+
+
+# check_error_stop_test: Integration test not included (requires compilation)
+
+# _handle_error_stop_test: Integration test not included (requires compilation)
+
+# _compile_and_run_normal_tests: Integration test not included (requires compilation)
+
+# _print_normal_test_summary: Output formatting test (not critical for unit testing)
+
+# _run_single_normal_test: Integration test not included (requires compilation)
+
+def test_generate_single_test_program(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test generate_single_test_program.
+    Verify that it generates a correct single test program.
+    """
+    out = runner.generate_single_test_program(
+        "test_module",
+        "test_addition",
+        tmp_path
+    )
+    text = out.read_text()
+    expected = """program run_test_addition
+    use fortest_assertions
+    use test_module
+    implicit none
+    call test_addition()
+end program run_test_addition\n"""
+    
+    assert text == expected
+
+
+# _print_error_stop_summary: Output formatting test (not critical for unit testing)
+
+# _handle_normal_test: Integration test not included (requires compilation and build systems)
+
+# _handle_normal_test_with_fpm: Integration test not included (requires FPM)
+
+# _run_single_test_with_fpm: Integration test not included (requires FPM)
+
+# _handle_normal_test_with_build_system: Integration test not included (requires CMake/Make)
+
+# _compile_and_run_tests_fallback: Integration test not included (requires compilation)
+
+# _run_single_error_stop_test: Integration test not included (requires compilation)
+
+# run_tests: High-level integration test not included (requires full environment)
+
+# print_summary: Output formatting test (not critical for unit testing)

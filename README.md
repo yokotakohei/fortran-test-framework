@@ -9,7 +9,8 @@ A testing framework for Fortran with automated test discovery and execution, pow
 - Automatic detection and handling of error stop in tests
 - Automatic test discovery for files matching `test_*.f90` pattern
 - Python-based test runner for flexible test discovery and execution
-- Integration with CMake and FPM build systems
+- Integration with FPM, CMake, and Make build systems
+- Automatic build system detection with intelligent fallback
 
 
 ## Architecture
@@ -17,7 +18,7 @@ A testing framework for Fortran with automated test discovery and execution, pow
 fortest consists of two components:
 
 1. **Python runner** (installed via pip): Test discovery and execution engine
-2. **Fortran assertions** (installed via CMake/FPM): Assertion functions used in test code
+2. **Fortran assertions** (installed via FPM/CMake/Make): Assertion functions used in test code
 
 
 ## Installation
@@ -303,11 +304,12 @@ fortest test/
 
 ### How fortest Works
 
-After building your project (with either CMake or FPM), `fortest` automatically:
+After building your project (with FPM, CMake, or Make), `fortest` automatically:
+- Detects your build system (priority: FPM > CMake > Make)
 - Discovers test files (`test_*.f90`)
 - Generates test runners
-- Compiles tests using build artifacts from `build/`
-- Executes all tests
+- Compiles and runs tests using the detected build system
+- Falls back to direct compilation with gfortran if no build system is found
 
 ## Command Line Options
 
