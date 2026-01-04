@@ -792,6 +792,115 @@ end program run_test_addition\n"""
 
 # _handle_normal_test_with_fpm: Integration test not included (requires FPM)
 
+
+def test__generate_temp_test_filename(tmp_path: Path, runner: FortranTestRunner) -> None:
+    """
+    Test _generate_temp_test_filename.
+    Verify that it generates unique filenames with proper hash-based naming.
+    """
+    test_dir = tmp_path / "test"
+    test_dir.mkdir()
+    
+    # Test basic filename generation
+    temp_file1, program_name1 = runner._generate_temp_test_filename("test_addition", test_dir)
+    assert temp_file1.parent == test_dir
+    assert temp_file1.suffix == ".f90"
+    assert temp_file1.name.startswith("fortest_")
+    assert program_name1.startswith("fortest_")
+    assert len(program_name1) <= 20  # Should be short (fortest_ + 8 char hash)
+    
+    # Test that the same test name generates the same hash
+    temp_file2, program_name2 = runner._generate_temp_test_filename("test_addition", test_dir)
+    assert temp_file1 == temp_file2
+    assert program_name1 == program_name2
+    
+    # Test different test names generate different hashes
+    temp_file3, program_name3 = runner._generate_temp_test_filename("test_subtraction", test_dir)
+    assert temp_file3.name != temp_file1.name
+    assert program_name3 != program_name1
+    
+    # Test collision handling: create a file, then generate name again
+    temp_file1.touch()
+    temp_file4, program_name4 = runner._generate_temp_test_filename("test_addition", test_dir)
+    assert temp_file4 != temp_file1  # Should get a different name due to collision
+    assert program_name4 != program_name1  # Program name should also differ
+    assert "_1" in temp_file4.name or "_1" in program_name4  # Counter added
+
+
+def test__filter_fpm_output(runner: FortranTestRunner) -> None:
+    """
+    Test _filter_fpm_output.
+    Verify that it filters FPM build messages while preserving test results.
+    """
+    # Test with FPM build messages and test results
+    raw_output = """[  0%] fortest_test_12345678
+[ 50%] fortest_test_12345678  done.
+<INFO> Building project...
+[PASS] Addition should work correctly
+       Expected: 5
+       Got: 5
+[FAIL] Subtraction should work correctly
+       Expected: 3
+       Got: 2
+STOP 0
+fpm build complete"""
+    
+    filtered = runner._filter_fpm_output(raw_output)
+    
+    # Should contain test results
+    assert "[PASS] Addition should work correctly" in filtered
+    assert "[FAIL] Subtraction should work correctly" in filtered
+    assert "       Expected: 5" in filtered
+    assert "       Expected: 3" in filtered
+    
+    # Should not contain FPM messages
+    assert "[  0%]" not in filtered
+    assert "[ 50%]" not in filtered
+    assert "done." not in filtered
+    assert "<INFO>" not in filtered
+    assert "STOP 0" not in filtered
+    assert "fpm build complete" not in filtered
+
+
+def test__filter_fpm_output_empty(runner: FortranTestRunner) -> None:
+    """
+    Test _filter_fpm_output with only FPM messages.
+    Verify that output becomes empty when there are no test results.
+    """
+    raw_output = """[  0%] Building...
+[ 50%] Compiling...
+[100%] Linking...
+fpm build complete"""
+    
+    filtered = runner._filter_fpm_output(raw_output)
+    
+    # Should be empty (only whitespace)
+    assert filtered.strip() == ""
+
+
+def test__filter_fpm_output_preserves_other_output(runner: FortranTestRunner) -> None:
+    """
+    Test _filter_fpm_output preserves non-FPM output.
+    Verify that custom test output is preserved.
+    """
+    raw_output = """[  0%] Building...
+[PASS] Test passed
+Debug: Custom debug message
+Another custom message
+fpm build complete"""
+    
+    filtered = runner._filter_fpm_output(raw_output)
+    
+    # Should preserve test results and custom messages
+    assert "[PASS] Test passed" in filtered
+    assert "Debug: Custom debug message" in filtered
+    assert "Another custom message" in filtered
+    
+    # Should not contain FPM messages
+    assert "[  0%]" not in filtered
+    assert "fpm build complete" not in filtered
+
+
 # _run_single_test_with_fpm: Integration test not included (requires FPM)
 
 # _handle_normal_test_with_build_system: Integration test not included (requires CMake/Make)

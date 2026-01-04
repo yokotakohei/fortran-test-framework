@@ -1725,7 +1725,10 @@ class FortranTestRunner:
                 print(result.stdout)
         except subprocess.CalledProcessError as e:
             print(f"{Colors.RED.value}FPM build failed:{Colors.RESET.value}")
-            print(e.stderr)
+            if e.stderr:
+                print(e.stderr)
+            if e.stdout:
+                print(e.stdout)
             # Return failure for all tests
             return [
                 TestResult(test_name, False, f"FPM build failed: {e.stderr}")
@@ -1772,6 +1775,100 @@ class FortranTestRunner:
         return all_results
 
 
+    def _generate_temp_test_filename(self, test_subroutine: str, test_dir: Path) -> tuple[Path, str]:
+        """
+        Generate a unique temporary test filename and program name.
+
+        Uses MD5 hash to create short names that comply with Fortran's
+        63-character identifier limit.
+
+        Parameters
+        ----------
+        test_subroutine : str
+            Name of the test subroutine
+        test_dir : Path
+            Directory where the temporary file will be created
+
+        Returns
+        -------
+        tuple[Path, str]
+            Tuple of (temp_file_path, program_name)
+        """
+        import hashlib
+
+        # Create a short unique hash from the test name
+        test_hash = hashlib.md5(test_subroutine.encode()).hexdigest()[:8]
+        temp_filename = f"fortest_{test_hash}.f90"
+        temp_test_file = test_dir / temp_filename
+
+        # Ensure unique filename (in case of hash collision)
+        counter = 0
+        while temp_test_file.exists():
+            counter += 1
+            temp_filename = f"fortest_{test_hash}_{counter}.f90"
+            temp_test_file = test_dir / temp_filename
+
+        # Program name must be short due to Fortran's 63-character limit
+        temp_program_name = f"fortest_{test_hash}"
+        if counter > 0:
+            temp_program_name = f"fortest_{test_hash}_{counter}"
+
+        return temp_test_file, temp_program_name
+
+
+    def _filter_fpm_output(self, output: str) -> str:
+        """
+        Filter FPM build/progress messages from test output.
+
+        Removes FPM-specific messages while preserving test results
+        and assertion details.
+
+        Parameters
+        ----------
+        output : str
+            Raw output from FPM test execution
+
+        Returns
+        -------
+        str
+            Filtered output containing only test results
+        """
+        # Remove common FPM build/progress messages
+        filtered_lines = []
+        for line in output.split('\n'):
+            # Keep lines with test results
+            if '[PASS]' in line or '[FAIL]' in line:
+                filtered_lines.append(line)
+                continue
+            # Keep lines that look like assertion details (indented with whitespace)
+            if line.startswith('       '):
+                filtered_lines.append(line)
+                continue
+            # Skip FPM build information lines and common FPM messages
+            if any(skip in line for skip in [
+                'fpm build complete',
+                'fpm test complete',
+                '+ mkdir',
+                '+ gfortran',
+                '+ ar',
+                'build/gfortran',
+                '[100%]',
+                '[  0%]',
+                '[ 50%]',
+                'building',
+                '<INFO>',
+                'STOP 0',
+                ' done.',
+            ]):
+                continue
+            # Skip empty lines
+            if not line.strip():
+                continue
+            # Keep other lines (might be test output)
+            filtered_lines.append(line)
+        return '\n'.join(filtered_lines)
+
+
     def _run_single_test_with_fpm(self,
         test_file: Path,
         test_module_name: str,
@@ -1801,16 +1898,23 @@ class FortranTestRunner:
             Test result
         """
         # Create a temporary test program in the project's test directory
+        # FPM requires test files to be in the test/ directory
+        import os
         temp_test_dir = build_system.project_dir / "test"
-        temp_test_file = temp_test_dir / f"temp_{test_subroutine}.f90"
 
+        # Generate unique temporary filename and program name
+        temp_test_file, temp_program_name = self._generate_temp_test_filename(
+            test_subroutine, temp_test_dir
+        )
+
+        # Generate test program content
         fortest_assertions: str = FortranTestRunner.ASSERTION_MODULE
-        program_content: str = f"program temp_{test_subroutine}\n"
+        program_content: str = f"program {temp_program_name}\n"
         program_content += f"    use {fortest_assertions}\n"
         program_content += f"    use {test_module_name}\n"
         program_content += "    implicit none\n"
         program_content += f"    call {test_subroutine}()\n"
-        program_content += f"end program temp_{test_subroutine}\n"
+        program_content += f"end program {temp_program_name}\n"
 
         try:
             with open(temp_test_file, "w") as f:
@@ -1820,7 +1924,7 @@ class FortranTestRunner:
                 print(f"Created temporary test program: {temp_test_file}")
 
             # Run fpm test for this specific test
-            test_cmd: list[str] = ["fpm", "test", f"temp_{test_subroutine}"]
+            test_cmd: list[str] = ["fpm", "test", temp_program_name]
 
             if self.verbose:
                 print(f"Running test with FPM: {' '.join(test_cmd)}")
@@ -1834,6 +1938,10 @@ class FortranTestRunner:
 
             # Parse output
             output = result.stdout if result.stdout else result.stderr
+
+            # Filter out FPM build messages in non-verbose mode
+            if not self.verbose:
+                output = self._filter_fpm_output(output)
 
             if self.verbose:
                 print(f"Test output:\n{output}")
