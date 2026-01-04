@@ -981,6 +981,7 @@ class FortranTestRunner:
         executable: Path = output_dir / test_file.stem
         compile_cmd: list[str] = [
             self.compiler,
+            "-J", str(output_dir),
             "-o",
             str(executable),
             str(test_file),
@@ -1052,7 +1053,11 @@ class FortranTestRunner:
 
         # Compile all files
         executable = output_dir / test_file.stem
-        compile_cmd = [self.compiler, "-o", str(executable)]
+        compile_cmd = [
+            self.compiler,
+            "-J", str(output_dir),
+            "-o", str(executable),
+        ]
 
         # Add all module files in dependency order
         compile_cmd.extend([str(f) for f in module_files])
@@ -2194,6 +2199,10 @@ class FortranTestRunner:
         # Add include paths for FPM build directories
         for build_dir in fpm_build_dirs:
             compile_cmd.extend(["-I", str(build_dir)])
+        
+        # Add -J flag to output .mod files to the executable's directory
+        output_dir = output_exe.parent
+        compile_cmd.extend(["-J", str(output_dir)])
         
         # Add module files
         for mod_file in module_files:
