@@ -209,6 +209,49 @@ def test_find_module_file_by_name(
     assert found2.name == "util.f90"
 
 
+def test_find_module_file_by_name_in_subdirectories(
+    tmp_path: Path,
+    resolver: ModuleDependencyResolver,
+) -> None:
+    """
+    Test find_module_file_by_name with nested subdirectories.
+    Verify that it finds modules in deeply nested directories like src/lae/, src/mesh/, etc.
+    """
+    # Create nested directory structure similar to toro project
+    (tmp_path / "src" / "lae").mkdir(parents=True)
+    (tmp_path / "src" / "mesh").mkdir(parents=True)
+    (tmp_path / "src" / "io").mkdir(parents=True)
+
+    # Create modules in subdirectories
+    abstract_solver = tmp_path / "src" / "lae" / "abstract_solver.f90"
+    abstract_solver.write_text("module abstract_solver\nend module abstract_solver")
+
+    mesh_module = tmp_path / "src" / "mesh" / "mesh_1d.f90"
+    mesh_module.write_text("module mesh_1d\nend module mesh_1d")
+
+    io_module = tmp_path / "src" / "io" / "text_writer.f90"
+    io_module.write_text("module text_writer\nend module text_writer")
+
+    # Search for modules
+    search_dirs = [tmp_path / "src"]
+
+    # All modules should be found despite being in subdirectories
+    found1 = resolver.find_module_file_by_name("abstract_solver", search_dirs)
+    assert found1 is not None
+    assert found1.name == "abstract_solver.f90"
+    assert "lae" in str(found1)
+
+    found2 = resolver.find_module_file_by_name("mesh_1d", search_dirs)
+    assert found2 is not None
+    assert found2.name == "mesh_1d.f90"
+    assert "mesh" in str(found2)
+
+    found3 = resolver.find_module_file_by_name("text_writer", search_dirs)
+    assert found3 is not None
+    assert found3.name == "text_writer.f90"
+    assert "io" in str(found3)
+
+
 def test_find_assertion_module(
     tmp_path: Path,
     resolver: ModuleDependencyResolver,
