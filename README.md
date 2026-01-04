@@ -283,12 +283,18 @@ When a test subroutine name contains `error_stop`, fortest will:
 
 ## Examples
 
-See the `examples/` directory for complete working examples with both CMake and FPM.
+The `examples/` directory contains complete working examples demonstrating fortest with different build systems:
+
+- **cmake/**: CMake-based project example
+- **fpm/**: FPM-based project example  
+- **make/**: Make-based project example
+
+Each example contains the same sample code and tests, showing how fortest works seamlessly with different build systems.
 
 ### CMake Example
 
 ```bash
-cd examples
+cd examples/cmake
 cmake -S . -B build
 cmake --build build
 fortest test/
@@ -297,8 +303,16 @@ fortest test/
 ### FPM Example
 
 ```bash
-cd examples
+cd examples/fpm
 fpm build
+fortest test/
+```
+
+### Make Example
+
+```bash
+cd examples/make
+make
 fortest test/
 ```
 
@@ -307,9 +321,11 @@ fortest test/
 After building your project (with FPM, CMake, or Make), `fortest` automatically:
 - Detects your build system (priority: FPM > CMake > Make)
 - Discovers test files (`test_*.f90`)
-- Generates test runners
-- Compiles and runs tests using the detected build system
+- Generates test runners dynamically
+- Compiles and runs tests using build artifacts
 - Falls back to direct compilation with gfortran if no build system is found
+
+All three examples produce identical test output, demonstrating fortest's build system agnostic approach.
 
 ## Command Line Options
 
@@ -332,8 +348,8 @@ Options:
 ```
 Running Fortran tests...
 
-Testing: examples/test/test_module_sample.f90
 ------------------------------------------------------------
+Testing: /home/user/project/examples/cmake/test/test_module_sample.f90
 [PASS] add_integers(2, 3) should return 5
 [PASS] multiply_real(0.0, 100.0) should return 0.0
 [FAIL] multiply_real(0.0, 100.0) should return 0.0
