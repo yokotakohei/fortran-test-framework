@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from fortest.test_code_generator import TestCodeGenerator
+from fortest.fortran_test_generator import FortranTestGenerator
 
 
 def write_file(path: Path, content: str) -> None:
@@ -18,16 +18,16 @@ def write_file(path: Path, content: str) -> None:
 
 
 @pytest.fixture
-def generator() -> TestCodeGenerator:
+def generator() -> FortranTestGenerator:
     """
-    Create a TestCodeGenerator instance for testing.
+    Create a FortranTestGenerator instance for testing.
     """
-    return TestCodeGenerator(verbose=False)
+    return FortranTestGenerator(verbose=False)
 
 
 def test_extract_test_subroutines(
     tmp_path: Path,
-    generator: TestCodeGenerator,
+    generator: FortranTestGenerator,
 ) -> None:
     """
     Test extract_test_subroutines.
@@ -56,7 +56,7 @@ end module test_sample
     assert subs == ["test_one", "test_two"]
 
 
-def test_separate_error_stop_tests(generator: TestCodeGenerator) -> None:
+def test_separate_error_stop_tests(generator: FortranTestGenerator) -> None:
     """
     Test separate_error_stop_tests.
     Verify that it separates test names correctly.
@@ -69,7 +69,7 @@ def test_separate_error_stop_tests(generator: TestCodeGenerator) -> None:
 
 def test_generate_test_program(
     tmp_path: Path,
-    generator: TestCodeGenerator,
+    generator: FortranTestGenerator,
 ) -> None:
     """
     Test generate_test_program.
@@ -95,7 +95,7 @@ end program run_test_module_sample\n"""
 
 def test_generate_error_stop_test_program(
     tmp_path: Path,
-    generator: TestCodeGenerator,
+    generator: FortranTestGenerator,
 ) -> None:
     """
     Test generate_error_stop_test_program.
@@ -116,7 +116,7 @@ end program run_test_error_stop_divide_by_zero\n"""
 
 def test_generate_single_test_program(
     tmp_path: Path,
-    generator: TestCodeGenerator,
+    generator: FortranTestGenerator,
 ) -> None:
     """
     Test generate_single_test_program.

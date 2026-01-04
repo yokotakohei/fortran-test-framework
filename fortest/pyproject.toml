@@ -31,3 +31,11 @@ Repository = "https://github.com/yokotakohei/fortran-test-framework"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+# Only collect tests from the tests/ directory, not from fortest/ package
+norecursedirs = ["fortest", "build", "dist", ".git", ".tox", "*.egg"]

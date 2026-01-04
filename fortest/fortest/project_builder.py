@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fortest.build_system_detector import BuildSystemInfo, BuildSystemDetector
 from fortest.module_dependency_resolver import ModuleDependencyResolver
-from fortest.test_code_generator import TestCodeGenerator
+from fortest.fortran_test_generator import FortranTestGenerator
 from fortest.test_result import Colors
 
 
@@ -23,7 +23,7 @@ class ProjectBuilder:
         verbose: bool = False,
         detector: BuildSystemDetector | None = None,
         resolver: ModuleDependencyResolver | None = None,
-        generator: TestCodeGenerator | None = None,
+        generator: FortranTestGenerator | None = None,
     ) -> None:
         """
         Initialize the project builder.
@@ -38,14 +38,14 @@ class ProjectBuilder:
             Build system detector instance, by default None (creates new one)
         resolver : ModuleDependencyResolver | None, optional
             Module dependency resolver instance, by default None (creates new one)
-        generator : TestCodeGenerator | None, optional
+        generator : FortranTestGenerator | None, optional
             Test code generator instance, by default None (creates new one)
         """
         self._compiler: str = compiler
         self._verbose: bool = verbose
         self._detector: BuildSystemDetector = detector or BuildSystemDetector(verbose)
         self._resolver: ModuleDependencyResolver = resolver or ModuleDependencyResolver(verbose)
-        self._generator: TestCodeGenerator = generator or TestCodeGenerator(verbose)
+        self._generator: FortranTestGenerator = generator or FortranTestGenerator(verbose)
 
     def build_with_system(self, build_info: BuildSystemInfo, test_file: Path) -> Path | None:
         """
@@ -92,7 +92,12 @@ class ProjectBuilder:
 
         return None
 
-    def compile_test(self, test_file: Path, output_dir: Path) -> Path | None:
+    def compile_test(
+        self,
+        test_file: Path,
+        output_dir: Path,
+        program_file: Path | None = None,
+    ) -> tuple[Path | None, str | None]:
         """
         Compile a Fortran test file with its dependencies.
 
@@ -105,28 +110,46 @@ class ProjectBuilder:
             Path to the test file to compile
         output_dir : Path
             Directory for output executable
+        program_file : Path | None, optional
+            Optional program file to compile with test file
 
         Returns
         -------
-        Path | None
-            Path to the compiled executable, or None if compilation failed
+        tuple[Path | None, str | None]
+            (Path to the compiled executable, error message if failed)
         """
         # Try to detect and use build system first
         build_info: BuildSystemInfo | None = self._detector.detect(test_file)
         if build_info is not None:
             executable_built: Path | None = self.build_with_system(build_info, test_file)
             if executable_built is not None:
-                return executable_built
+                return executable_built, None
 
             # If build system detected but failed, fall back to direct compilation
             if self._verbose:
                 print("Falling back to direct compilation with gfortran")
 
+        # If program_file is provided, use it for compilation
+        if program_file is not None:
+            # Use _compile_module_test with the custom program file
+            executable = self._compile_module_test(
+                test_file, output_dir, program_file=program_file
+            )
+            if executable is None:
+                return None, "Compilation failed"
+            return executable, None
+
         # Check if this is a standalone program or module-based test
         if self._is_standalone_program(test_file):
-            return self._compile_standalone_program(test_file, output_dir)
+            executable = self._compile_standalone_program(test_file, output_dir)
+            if executable is None:
+                return None, "Compilation failed"
+            return executable, None
         else:
-            return self._compile_module_test(test_file, output_dir)
+            executable = self._compile_module_test(test_file, output_dir)
+            if executable is None:
+                return None, "Compilation failed"
+            return executable, None
 
     def _build_with_cmake(self, project_dir: Path, test_file: Path) -> Path | None:
         """
@@ -287,7 +310,12 @@ class ProjectBuilder:
             print(e.stderr)
             return None
 
-    def _compile_module_test(self, test_file: Path, output_dir: Path) -> Path | None:
+    def _compile_module_test(
+        self,
+        test_file: Path,
+        output_dir: Path,
+        program_file: Path | None = None,
+    ) -> Path | None:
         """
         Compile a module-based test file with its dependencies.
 
@@ -297,6 +325,8 @@ class ProjectBuilder:
             Path to the test file
         output_dir : Path
             Directory for output executable
+        program_file : Path | None, optional
+            Optional pre-generated program file to use instead of generating one
 
         Returns
         -------
@@ -323,13 +353,17 @@ class ProjectBuilder:
         # Find module dependencies (including assertions for standalone mode)
         module_files: list[Path] = self._resolver.find_module_files(test_file, include_assertions=True)
 
-        # Generate main program
-        main_program: Path = self._generator.generate_test_program(
-            test_file,
-            test_module_name,
-            test_subroutines,
-            output_dir,
-        )
+        # Use provided program file or generate one
+        if program_file is not None:
+            main_program = program_file
+        else:
+            # Generate main program
+            main_program: Path = self._generator.generate_test_program(
+                test_file,
+                test_module_name,
+                test_subroutines,
+                output_dir,
+            )
 
         # Compile all files
         executable = output_dir / test_file.stem

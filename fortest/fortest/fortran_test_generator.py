@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import ClassVar
 
 
-class TestCodeGenerator:
+class FortranTestGenerator:
     """
     Generates Fortran test programs.
 

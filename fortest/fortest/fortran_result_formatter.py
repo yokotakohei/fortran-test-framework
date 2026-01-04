@@ -7,7 +7,7 @@ from fortest.test_result import Colors, MessageTag, TestResult
 from fortest.exit_status import ExitStatus
 
 
-class TestResultFormatter:
+class FortranResultFormatter:
     """
     Formats and displays test results.
 
@@ -128,6 +128,21 @@ class TestResultFormatter:
         normal_results : list[TestResult]
             List of normal test results
         """
+        # Print individual results
+        for result in normal_results:
+            if result.passed:
+                print(
+                    f"{Colors.GREEN.value}{MessageTag.PASS.value}{Colors.RESET.value} "
+                    f"{result.name}"
+                )
+            else:
+                print(
+                    f"{Colors.RED.value}{MessageTag.FAIL.value}{Colors.RESET.value} "
+                    f"{result.name}"
+                )
+            if result.message:
+                print(f"       {result.message}")
+
         separator: str = "=" * 50
         normal_passed: int = sum(1 for r in normal_results if r.passed)
         normal_failed: int = len(normal_results) - normal_passed

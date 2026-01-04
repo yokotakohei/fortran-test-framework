@@ -15,9 +15,10 @@ from fortest.test_result import Colors, MessageTag, TestResult
 from fortest.exit_status import ExitStatus
 from fortest.build_system_detector import BuildSystemInfo, BuildSystemDetector
 from fortest.module_dependency_resolver import ModuleDependencyResolver
-from fortest.test_code_generator import TestCodeGenerator
-from fortest.test_result_formatter import TestResultFormatter
+from fortest.fortran_test_generator import FortranTestGenerator
+from fortest.fortran_result_formatter import FortranResultFormatter
 from fortest.project_builder import ProjectBuilder
+from fortest.fortran_test_executor import FortranTestExecutor
 
 
 class FortranTestRunner:
@@ -87,9 +88,10 @@ class FortranTestRunner:
         # Initialize helper classes
         self.detector: BuildSystemDetector = BuildSystemDetector(verbose)
         self.resolver: ModuleDependencyResolver = ModuleDependencyResolver(verbose)
-        self.generator: TestCodeGenerator = TestCodeGenerator(verbose)
-        self.formatter: TestResultFormatter = TestResultFormatter(verbose)
+        self.generator: FortranTestGenerator = FortranTestGenerator(verbose)
+        self.formatter: FortranResultFormatter = FortranResultFormatter(verbose)
         self.builder: ProjectBuilder = ProjectBuilder(compiler, verbose, self.detector, self.resolver, self.generator)
+        self.executor: FortranTestExecutor = FortranTestExecutor(compiler, verbose, self.detector, self.resolver, self.generator, self.formatter, self.builder)
 
 
     def find_test_files(self, pattern: str) -> list[Path]:
@@ -2567,20 +2569,22 @@ class FortranTestRunner:
                 print(separator)
                 print(f"{Colors.BLUE.value}Testing: {test_file}{Colors.RESET.value}")
 
-                # Check if this is an error_stop test
-                if "error_stop" in test_file.name.lower():
-                    results: list[TestResult] = self._handle_error_stop_test(
-                        test_file,
-                        output_dir,
-                    )
-                else:
-                    # Normal test
-                    if self.verbose:
-                        print(f"Calling _handle_normal_test for {test_file}")
-                    results = self._handle_normal_test(test_file, output_dir)
+                # Delegate to TestExecutor
+                normal_results, error_results = self.executor.handle_test_file(
+                    test_file,
+                    output_dir,
+                )
+
+                # Display results
+                if normal_results:
+                    self.formatter.print_normal_test_summary(normal_results)
+                
+                if error_results:
+                    self.formatter.print_error_stop_summary(error_results)
 
                 # Update statistics
-                for result in results:
+                all_results = normal_results + error_results
+                for result in all_results:
                     self.total_tests += 1
                     if result.passed:
                         self.passed_tests += 1

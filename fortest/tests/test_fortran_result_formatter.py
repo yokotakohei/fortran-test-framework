@@ -5,18 +5,18 @@ Tests are ordered according to method definitions in test_result_formatter.py.
 
 import pytest
 
-from fortest.test_result_formatter import TestResultFormatter
+from fortest.fortran_result_formatter import FortranResultFormatter
 
 
 @pytest.fixture
-def formatter() -> TestResultFormatter:
+def formatter() -> FortranResultFormatter:
     """
-    Create a TestResultFormatter instance for testing.
+    Create a FortranResultFormatter instance for testing.
     """
-    return TestResultFormatter(verbose=False)
+    return FortranResultFormatter(verbose=False)
 
 
-def test_parse_test_output_with_pass(formatter: TestResultFormatter) -> None:
+def test_parse_test_output_with_pass(formatter: FortranResultFormatter) -> None:
     """
     Test parse_test_output with passing tests.
     Verify that it correctly parses [PASS] tags.
@@ -31,7 +31,7 @@ def test_parse_test_output_with_pass(formatter: TestResultFormatter) -> None:
     assert results[1].passed is True
 
 
-def test_parse_test_output_with_fail(formatter: TestResultFormatter) -> None:
+def test_parse_test_output_with_fail(formatter: FortranResultFormatter) -> None:
     """
     Test parse_test_output with failing tests.
     Verify that it correctly parses [FAIL] tags.
@@ -46,7 +46,7 @@ def test_parse_test_output_with_fail(formatter: TestResultFormatter) -> None:
     assert results[1].passed is True
 
 
-def test_parse_test_output_empty(formatter: TestResultFormatter) -> None:
+def test_parse_test_output_empty(formatter: FortranResultFormatter) -> None:
     """
     Test parse_test_output with empty output.
     Verify that it returns an empty list.
@@ -57,7 +57,7 @@ def test_parse_test_output_empty(formatter: TestResultFormatter) -> None:
     assert results == []
 
 
-def test_filter_fpm_output(formatter: TestResultFormatter) -> None:
+def test_filter_fpm_output(formatter: FortranResultFormatter) -> None:
     """
     Test _filter_fpm_output.
     Verify that it filters FPM build messages while preserving test results.
@@ -92,7 +92,7 @@ fpm build complete"""
     assert "fpm build complete" not in filtered
 
 
-def test_filter_fpm_output_empty(formatter: TestResultFormatter) -> None:
+def test_filter_fpm_output_empty(formatter: FortranResultFormatter) -> None:
     """
     Test _filter_fpm_output with only FPM messages.
     Verify that output becomes empty when there are no test results.
@@ -109,7 +109,7 @@ fpm build complete"""
 
 
 def test_filter_fpm_output_preserves_other_output(
-    formatter: TestResultFormatter,
+    formatter: FortranResultFormatter,
 ) -> None:
     """
     Test _filter_fpm_output preserves non-FPM output.
